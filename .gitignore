@@ -1,0 +1,19 @@
+# IDE / 编辑器
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+
+# Node
+node_modules/
+npm-debug.log*
+
+# 备份 / 临时文件
+*.bak
+*.polluted.bak
+*.tmp
+.DS_Store
+Thumbs.db
+
+# 本地日志
+*.log

@@ -1,0 +1,381 @@
+/* eslint-disable */
+/*
+  DEEPREEL 本地代理 v2
+  ------------------------------------------------------------------
+  三个功能：
+  1) DeepSeek API 代理 → POST /chat/completions
+  2) B站视频流 API 代理 → GET /bili/playurl?bvid=xxx&cid=xxx&qn=80&fnval=1
+  3) B站视频流转发     → GET /bili/stream?url=xxx
+
+  用法：
+    node proxy.js
+  端口默认 7392，可用环境变量 DEEPREEL_PORT 修改
+*/
+const http = require('http');
+const https = require('https');
+
+const PORT = process.env.DEEPREEL_PORT || 7392;
+const DS_UPSTREAM = process.env.DEEPREEL_UPSTREAM || 'api.deepseek.com';
+const BILI_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Bili-Cookie',
+  'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
+  'Access-Control-Max-Age': '86400',
+};
+
+/* 上游（B站 CDN）自带 CORS 头时先剥掉，避免与本地 CORS 叠加成 '*, *' 导致浏览器拒绝 */
+function stripCors(headers) {
+  const h = { ...headers };
+  for (const k of Object.keys(h)) {
+    if (/^access-control-/i.test(k)) delete h[k];
+  }
+  return h;
+}
+
+http.createServer((req, res) => {
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, CORS);
+    return res.end();
+  }
+
+  const parsed = new URL(req.url, `http://localhost:${PORT}`);
+  const path = parsed.pathname;
+
+  if (path === '/chat/completions' || path === '/v1/chat/completions') {
+    handleDeepSeek(req, res);
+  } else if (path === '/bili/playurl') {
+    handleBiliPlayurl(req, res, parsed);
+  } else if (path === '/bili/view') {
+    handleBiliView(req, res, parsed);
+  } else if (path === '/bili/player') {
+    handleBiliPlayer(req, res, parsed);
+  } else if (path === '/bili/qrcode/generate') {
+    handleBiliQrGenerate(req, res);
+  } else if (path === '/bili/qrcode/poll') {
+    handleBiliQrPoll(req, res, parsed);
+  } else if (path === '/bili/stream') {
+    handleBiliStream(req, res, parsed);
+  } else if (path === '/bili/img') {
+    handleBiliImg(req, res, parsed);
+  } else {
+    res.writeHead(404, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ error: 'not_found', path }));
+  }
+}).listen(PORT, () => {
+  console.log(`\n  DEEPREEL 代理 v2 已启动`);
+  console.log(`  端口      → http://localhost:${PORT}`);
+  console.log(`  DeepSeek  → /chat/completions`);
+  console.log(`  B站 API   → /bili/playurl, /bili/view, /bili/player`);
+  console.log(`  B站 流    → /bili/stream?url=xxx`);
+  console.log(`  按 Ctrl+C 停止\n`);
+});
+
+/* ============ DeepSeek 代理 ============ */
+function handleDeepSeek(req, res) {
+  const chunks = [];
+  req.on('data', c => chunks.push(c));
+  req.on('error', () => { res.writeHead(400, CORS); res.end('bad request'); });
+  req.on('end', () => {
+    const body = Buffer.concat(chunks);
+    const outHeaders = {
+      'Content-Type': req.headers['content-type'] || 'application/json',
+      'Authorization': req.headers['authorization'] || '',
+      'Content-Length': body.length,
+      'Accept': req.headers['accept'] || 'application/json',
+      // SSE 流式转发时禁止上游 gzip，否则分块语义会被压缩层吞掉
+      'Accept-Encoding': 'identity',
+      'User-Agent': 'deepreel-proxy/2.0',
+    };
+    const proxyReq = https.request(
+      { host: DS_UPSTREAM, path: req.url, method: req.method, headers: outHeaders },
+      up => {
+        const respHeaders = { ...stripCors(up.headers), ...CORS };
+        res.writeHead(up.statusCode || 200, respHeaders);
+        res.flushHeaders();
+        up.pipe(res);
+      }
+    );
+    proxyReq.on('error', e => {
+      res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+      res.end(JSON.stringify({ error: 'upstream_error', detail: String(e?.message || e) }));
+    });
+    proxyReq.end(body);
+  });
+}
+
+/* ============ B站 playurl 代理 ============ */
+function handleBiliPlayurl(req, res, parsed) {
+  const bvid = parsed.searchParams.get('bvid');
+  const cid = parsed.searchParams.get('cid');
+  const qn = parsed.searchParams.get('qn') || '80';
+  const fnval = parsed.searchParams.get('fnval') || '1';
+  const cookie = req.headers['x-bili-cookie'] || '';
+
+  if (!bvid || !cid) {
+    res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
+    return res.end(JSON.stringify({ code: -1, message: 'missing bvid or cid' }));
+  }
+
+  const apiPath = `/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=${qn}&fnval=${fnval}&fnver=0&fourk=1`;
+
+  const proxyReq = https.request({
+    host: 'api.bilibili.com',
+    path: apiPath,
+    method: 'GET',
+    headers: {
+      'Referer': 'https://www.bilibili.com',
+      'User-Agent': BILI_UA,
+      'Cookie': cookie,
+    },
+  }, up => {
+    const respHeaders = { 'Content-Type': 'application/json', ...CORS };
+    res.writeHead(up.statusCode || 200, respHeaders);
+    up.pipe(res);
+  });
+  proxyReq.on('error', e => {
+    res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ code: -1, message: 'upstream_error: ' + String(e?.message || e) }));
+  });
+  proxyReq.end();
+}
+
+/* ============ B站 view 代理（视频信息） ============ */
+function handleBiliView(req, res, parsed) {
+  const bvid = parsed.searchParams.get('bvid');
+  const cookie = req.headers['x-bili-cookie'] || '';
+
+  if (!bvid) {
+    res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
+    return res.end(JSON.stringify({ code: -1, message: 'missing bvid' }));
+  }
+
+  const apiPath = `/x/web-interface/view?bvid=${bvid}`;
+
+  const proxyReq = https.request({
+    host: 'api.bilibili.com',
+    path: apiPath,
+    method: 'GET',
+    headers: {
+      'Referer': 'https://www.bilibili.com',
+      'User-Agent': BILI_UA,
+      'Cookie': cookie,
+    },
+  }, up => {
+    const respHeaders = { 'Content-Type': 'application/json', ...CORS };
+    res.writeHead(up.statusCode || 200, respHeaders);
+    up.pipe(res);
+  });
+  proxyReq.on('error', e => {
+    res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ code: -1, message: 'upstream_error: ' + String(e?.message || e) }));
+  });
+  proxyReq.end();
+}
+
+/* ============ B站 player/v2 代理（字幕信息） ============ */
+function handleBiliPlayer(req, res, parsed) {
+  const bvid = parsed.searchParams.get('bvid');
+  const cid = parsed.searchParams.get('cid');
+  const cookie = req.headers['x-bili-cookie'] || '';
+
+  if (!bvid || !cid) {
+    res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
+    return res.end(JSON.stringify({ code: -1, message: 'missing bvid or cid' }));
+  }
+
+  const apiPath = `/x/player/v2?bvid=${bvid}&cid=${cid}`;
+
+  const proxyReq = https.request({
+    host: 'api.bilibili.com',
+    path: apiPath,
+    method: 'GET',
+    headers: {
+      'Referer': 'https://www.bilibili.com',
+      'User-Agent': BILI_UA,
+      'Cookie': cookie,
+    },
+  }, up => {
+    const respHeaders = { 'Content-Type': 'application/json', ...CORS };
+    res.writeHead(up.statusCode || 200, respHeaders);
+    up.pipe(res);
+  });
+  proxyReq.on('error', e => {
+    res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ code: -1, message: 'upstream_error: ' + String(e?.message || e) }));
+  });
+  proxyReq.end();
+}
+
+/* ============ B站扫码登录 · 生成二维码 ============ */
+function handleBiliQrGenerate(req, res) {
+  const proxyReq = https.request({
+    host: 'passport.bilibili.com',
+    path: '/x/passport-login/web/qrcode/generate',
+    method: 'GET',
+    headers: {
+      'User-Agent': BILI_UA,
+      'Referer': 'https://www.bilibili.com',
+    },
+  }, up => {
+    const respHeaders = { 'Content-Type': 'application/json', ...CORS };
+    res.writeHead(up.statusCode || 200, respHeaders);
+    up.pipe(res);
+  });
+  proxyReq.on('error', e => {
+    res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ code: -1, message: 'upstream_error: ' + String(e?.message || e) }));
+  });
+  proxyReq.end();
+}
+
+/* ============ B站扫码登录 · 轮询状态 ============ */
+function handleBiliQrPoll(req, res, parsed) {
+  const key = parsed.searchParams.get('key');
+  if (!key) {
+    res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
+    return res.end(JSON.stringify({ code: -1, message: 'missing key' }));
+  }
+
+  const proxyReq = https.request({
+    host: 'passport.bilibili.com',
+    path: `/x/passport-login/web/qrcode/poll?qrcode_key=${encodeURIComponent(key)}`,
+    method: 'GET',
+    headers: {
+      'User-Agent': BILI_UA,
+      'Referer': 'https://www.bilibili.com',
+    },
+  }, up => {
+    const setCookies = up.headers['set-cookie'] || [];
+    let body = '';
+    up.on('data', c => body += c);
+    up.on('end', () => {
+      try {
+        const j = JSON.parse(body);
+        if (setCookies.length) {
+          j._cookie = setCookies.map(c => c.split(';')[0]).join('; ');
+        }
+        res.writeHead(up.statusCode || 200, { 'Content-Type': 'application/json', ...CORS });
+        res.end(JSON.stringify(j));
+      } catch {
+        res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+        res.end(JSON.stringify({ code: -1, message: 'parse error' }));
+      }
+    });
+  });
+  proxyReq.on('error', e => {
+    res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ code: -1, message: 'upstream_error: ' + String(e?.message || e) }));
+  });
+  proxyReq.end();
+}
+
+/* ============ B站视频流转发 ============ */
+function handleBiliStream(req, res, parsed) {
+  const streamUrl = parsed.searchParams.get('url');
+  if (!streamUrl) {
+    res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
+    return res.end(JSON.stringify({ error: 'missing url param' }));
+  }
+
+  const cookie = req.headers['x-bili-cookie'] || '';
+  let target;
+  try { target = new URL(streamUrl); }
+  catch { res.writeHead(400, CORS); return res.end(JSON.stringify({ error: 'invalid url' })); }
+  if (target.protocol !== 'https:') {
+    res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
+    return res.end(JSON.stringify({ error: 'https only' }));
+  }
+
+  const buildHeaders = () => {
+    const h = {
+      'Referer': 'https://www.bilibili.com',
+      'User-Agent': BILI_UA,
+      'Accept': '*/*',
+    };
+    if (cookie) h['Cookie'] = cookie;
+    if (req.headers['range']) h['Range'] = req.headers['range'];
+    return h;
+  };
+
+  // B站 CDN 可能返回 302 跳转到其它节点，跟随跳转（最多 5 次）
+  const hop = (t, depth) => {
+    const proxyReq = https.request({
+      host: t.hostname,
+      port: t.port || 443,
+      path: t.pathname + t.search,
+      method: 'GET',
+      headers: buildHeaders(),
+      rejectUnauthorized: false, // mcdn 节点证书与域名不匹配，仅拉流可忽略
+    }, up => {
+      const st = up.statusCode || 0;
+      if ([301, 302, 303, 307, 308].includes(st) && up.headers.location && depth < 5) {
+        up.resume();
+        try { hop(new URL(up.headers.location, t), depth + 1); }
+        catch {
+          if (!res.headersSent) {
+            res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+            res.end(JSON.stringify({ error: 'bad redirect' }));
+          }
+        }
+        return;
+      }
+      const respHeaders = { ...stripCors(up.headers), ...CORS };
+      res.writeHead(st || 200, respHeaders);
+      up.pipe(res);
+      up.on('error', () => { try { res.end(); } catch {} });
+    });
+    proxyReq.on('error', e => {
+      if (!res.headersSent) {
+        res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+        res.end(JSON.stringify({ error: 'upstream_error: ' + String(e?.message || e) }));
+      } else {
+        try { res.end(); } catch {}
+      }
+    });
+    proxyReq.end();
+  };
+  hop(target, 0);
+}
+
+/* ============ B站封面图代理（绕过防盗链） ============ */
+function handleBiliImg(req, res, parsed) {
+  const raw = parsed.searchParams.get('url');
+  if (!raw) {
+    res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
+    return res.end(JSON.stringify({ error: 'missing url param' }));
+  }
+  let target;
+  try { target = new URL(raw); }
+  catch { res.writeHead(400, CORS); return res.end(JSON.stringify({ error: 'invalid url' })); }
+  if (target.protocol !== 'https:' && target.protocol !== 'http:') {
+    res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
+    return res.end(JSON.stringify({ error: 'http(s) only' }));
+  }
+  const mod = target.protocol === 'https:' ? https : http;
+  const proxyReq = mod.request({
+    host: target.hostname,
+    port: target.port || (target.protocol === 'https:' ? 443 : 80),
+    path: target.pathname + target.search,
+    method: 'GET',
+    headers: {
+      'Referer': 'https://www.bilibili.com',
+      'User-Agent': BILI_UA,
+      'Accept': 'image/*',
+    },
+    rejectUnauthorized: false,
+  }, up => {
+    const respHeaders = { ...stripCors(up.headers), ...CORS, 'Cache-Control': 'public, max-age=86400' };
+    res.writeHead(up.statusCode || 200, respHeaders);
+    up.pipe(res);
+  });
+  proxyReq.on('error', e => {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+      res.end(JSON.stringify({ error: 'upstream_error: ' + String(e?.message || e) }));
+    } else { try { res.end(); } catch {} }
+  });
+  proxyReq.end();
+}

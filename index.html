@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" class=""><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DEEPREEL · 深刷 — 专注、持续、深度、沉浸学习</title>
+<meta name="description" content="依托 B 站的专注式学习追踪：导入你选的长视频，屏蔽推荐干扰，按分 P 进度推进，AI 摘要已学知识。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314110B'/%3E%3Ccircle cx='32' cy='32' r='17' fill='%23FFD200'/%3E%3Cpath d='M32 15a17 17 0 000 34z' fill='%2314110B'/%3E%3C/svg%3E">
+
+<!-- 字体：Fraunces 展示衬线 + Noto Serif/Sans SC + Space Mono -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300..900&amp;family=Noto+Sans+SC:wght@300;400;500;700&amp;family=Noto+Serif+SC:wght@400;600;900&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+
+<!-- 动效库 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/lenis@1.1.14/dist/lenis.min.js"></script>
+
+<link rel="stylesheet" href="styles.css">
+</head>
+
+<body data-view="library">
+
+<!-- 纸张噪点叠层 -->
+<div class="grain" aria-hidden="true"></div>
+
+<!-- ============ 顶栏 ============ -->
+<header class="topbar">
+  <div class="brand" id="btn-home">
+    <span class="brand-mark">◐</span>
+    <span class="brand-name">DEEPREEL</span>
+    <span class="brand-sub">深刷</span>
+  </div>
+  
+<nav class="topbar-actions">
+    <button class="ghost-btn" id="btn-stats" title="学习统计 · 日历 · 年度报告">
+      <span class="dot-stat">◔</span>
+      <span>统计</span>
+    </button>
+    <button class="ghost-btn" id="btn-settings" title="设置">
+      <span class="dot-ai" id="ai-status-dot"></span>
+      <span>设置</span>
+    </button>
+  </nav></header>
+
+<!-- ============ 资料库视图 ============ -->
+<main id="view-library" class="view view--library">
+
+  <!-- 导入 Hero -->
+  <section class="hero">
+    <p class="eyebrow split-line"><span>FOCUS · LEARN · FINISH</span></p>
+    <h1 class="hero-title">
+      把 <em>B 站</em> 变成你的<em>自习室</em>。<br>
+      专注、持续、深度、<span class="hl">沉浸</span>学习。
+    </h1>
+
+    <ul class="hero-pillars" role="list" aria-label="产品特点">
+      <li class="pillar" role="listitem">
+        <span class="p-no">01</span>
+        <span class="p-word">专注</span>
+        <span class="p-en">FOCUS</span>
+        <span class="p-desc">屏蔽推荐，只看你选的</span>
+      </li>
+      <li class="pillar" role="listitem">
+        <span class="p-no">02</span>
+        <span class="p-word">持续</span>
+        <span class="p-en">PERSIST</span>
+        <span class="p-desc">每日打卡，日历追踪</span>
+      </li>
+      <li class="pillar" role="listitem">
+        <span class="p-no">03</span>
+        <span class="p-word">深度</span>
+        <span class="p-en">DEPTH</span>
+        <span class="p-desc">分 P 推进，学透去重</span>
+      </li>
+      <li class="pillar" role="listitem">
+        <span class="p-no">04</span>
+        <span class="p-word">沉浸</span>
+        <span class="p-en">FLOW</span>
+        <span class="p-desc">全屏无扰，心流学习</span>
+      </li>
+    </ul>
+
+    <p class="hero-desc">导入你挑选的长视频，推荐栏与无关内容全部隐去。按分 P 像目录一样推进进度，AI 帮你摘要「学到了什么」，已学知识不再重复刷。</p>
+
+    <form class="import-row" id="import-form" autocomplete="off">
+      <div class="import-field">
+        <span class="import-prefix">BV</span>
+        <input id="import-input" type="text" placeholder="粘贴 B 站视频链接或 BV 号…" spellcheck="false">
+      </div>
+      <button class="solid-btn" type="submit" id="btn-import">导入并专注</button>
+      <button class="ghost-btn" type="button" id="btn-demo">载入示例</button>
+    </form>
+    <p class="import-error" id="import-error" role="alert"></p>
+
+    <section class="learn-dashboard" id="learn-dashboard" aria-label="学习仪表盘"></section>
+  </section>
+
+  <!-- 课程列表 -->
+  <section class="library-section">
+    <div class="section-head">
+      <h2>课程库</h2>
+      <p class="section-note">点开一卷，掩卷研习，无扰沉浸。</p>
+    </div>
+
+    <!-- 置顶栏（横向滑动） -->
+    <div class="pinned-wrap" id="pinned-wrap" hidden>
+      <div class="pinned-head"><span class="pin-star">★</span>置顶</div>
+      <div class="pinned-row" id="pinned-row"></div>
+    </div>
+
+    <!-- 工具行：搜索 + 分类 -->
+    <div class="lib-toolbar" id="lib-toolbar" hidden>
+      <div class="lib-search">
+        <span class="ls-icon">⌕</span>
+        <input id="lib-search-input" type="text" placeholder="搜索课程 / UP主…" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="lib-cats" id="lib-cats"></div>
+    </div>
+
+    <div class="courses-grid" id="library-grid"></div>
+    <div class="empty-state" id="empty-state" hidden="">
+      <div class="empty-glyph">◐</div>
+      <p>书斋尚空，未有藏书。</p>
+      <span>取一卷 B 站长视频入架，或点「载入示例」先观其形。</span>
+    </div>
+
+    <!-- 分页 -->
+    <div class="lib-pager" id="lib-pager" hidden></div>
+  </section>
+</main>
+
+<!-- 通用小弹窗（重命名 / 删除确认 / 分类） -->
+<div class="mini-modal-mask" id="mini-modal" hidden>
+  <div class="mini-modal" role="dialog" aria-modal="true">
+    <h4 id="mm-title">标题</h4>
+    <div class="mm-body" id="mm-body"></div>
+    <div class="mm-foot">
+      <button class="ghost-btn" id="mm-cancel">取消</button>
+      <button class="solid-btn" id="mm-ok">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 专注播放视图 ============ -->
+<main id="view-watch" class="view view--watch" hidden="">
+
+  <div class="watch-topbar">
+    <button class="ghost-btn" id="btn-back">← 返回课程库</button>
+    <div class="watch-title" id="watch-title">—</div>
+    <div class="watch-overall">
+      <div class="wo-bar"><i id="wo-fill"></i></div>
+      <span class="wo-text" id="wo-text">0%</span>
+    </div>
+  </div>
+
+  <div class="watch-main">
+    <!-- 播放器区 -->
+    <section class="player-wrap">
+      <div class="player-frame-wrap" id="player-frame-wrap">
+        <video id="player-video" class="player-video" playsinline></video>
+        <div class="player-controls" id="player-controls">
+          <div class="pc-progress" id="pc-seek">
+            <div class="pc-buffered" id="pc-buffered"></div>
+            <div class="pc-played" id="pp-fill"></div>
+          </div>
+          <div class="pc-bar">
+            <button class="pc-btn" id="btn-play" title="播放/暂停">播放</button>
+            <span class="pc-time" id="pp-time">0:00 / 0:00</span>
+            <button class="pc-btn" id="btn-mute" title="静音">静音</button>
+            <input type="range" id="vol-slider" class="pc-vol" min="0" max="100" value="100" title="音量">
+            <select class="pc-select" id="sel-speed" title="倍速">
+              <option value="0.75">0.75x</option>
+              <option value="1" selected>1x</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+              <option value="2">2x</option>
+            </select>
+            <select class="pc-select" id="sel-quality" title="清晰度">
+              <option value="80">1080P</option>
+              <option value="64">720P</option>
+              <option value="32">480P</option>
+              <option value="16">360P</option>
+            </select>
+            <button class="pc-btn" id="btn-fscreen" title="全屏">全屏</button>
+          </div>
+        </div>
+        <div class="player-focus-tip" id="player-focus-tip">
+          <span class="focus-dot"></span> 专注模式 · 无推荐、无干扰
+        </div>
+        <div class="player-loading" id="player-loading" hidden>
+          <span class="sk-loader"></span> 正在加载视频…
+        </div>
+      </div>
+
+      <!-- 当前分 P 控制条 -->
+      <div class="part-bar">
+        <div class="part-bar-left">
+          <span class="part-no" id="pb-no">P1</span>
+          <span class="part-title" id="pb-title">—</span>
+        </div>
+        <div class="part-bar-right">
+          <button class="mini-btn" id="btn-mark-done" title="标记本 P 已学完">标记学完</button>
+          <button class="mini-btn" id="btn-prev" title="上一 P">‹</button>
+          <button class="mini-btn" id="btn-next" title="下一 P">›</button>
+        </div>
+      </div>
+      <!-- 实时学习计时（观看 / 思考） -->
+      <div class="watch-stats" id="watch-stats" aria-live="polite"></div>
+    </section>
+
+    <!-- 侧栏：目录 + 摘要 -->
+    <aside class="side-panel">
+      <div class="panel-block panel-chart">
+        <div class="panel-head">
+          <h3>治学图谱</h3>
+          <span class="panel-meta" id="pc-meta">—</span>
+        </div>
+        <div class="part-chart" id="part-chart"></div>
+        <div class="motivation-line" id="motivation-line"></div>
+      </div>
+
+      <div class="panel-block">
+        <div class="panel-head">
+          <h3>课程目录</h3>
+          <span class="panel-meta" id="toc-meta">—</span>
+        </div>
+        <div class="toc" id="toc-list" role="list"></div>
+      </div>
+
+      <div class="panel-block">
+        <div class="panel-head">
+          <h3>AI 摘要</h3>
+          <button class="mini-btn" id="btn-summarize">生成本 P 摘要</button>
+        </div>
+        <div class="summary-panel" id="summary-content">
+          <div class="summary-empty">点击「生成本 P 摘要」，AI 将基于字幕提炼知识点，并与其它分 P 去重。</div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</main>
+
+<!-- ============ 设置视图 ============ -->
+<main id="view-settings" class="view view--settings" hidden="">
+  <div class="settings-topbar">
+    <button class="ghost-btn" id="btn-back-settings">← 返回</button>
+    <div class="settings-title">设置</div>
+  </div>
+  <div class="settings-wrap">
+
+    <section class="ld-card settings-block">
+      <h4>① B 站账号 · 扫码登录</h4>
+      <p class="settings-desc">用 B 站手机客户端扫描二维码即可解锁高清视频流，全程本地完成，无需手动复制 Cookie。</p>
+      <div class="bili-status" id="bili-status">
+        <span class="bili-dot" id="bili-dot"></span>
+        <span class="bili-status-text" id="bili-status-text">请扫码登录获取 Cookie</span>
+      </div>
+      <div class="settings-actions">
+        <button class="bili-btn qr" id="btn-bili-qr">扫码登录</button>
+        <button class="bili-btn logout" id="btn-bili-logout" hidden>退出登录</button>
+        <button class="bili-btn refresh" id="btn-bili-refresh">重新加载视频</button>
+      </div>
+      <label class="field">
+        <span>默认清晰度</span>
+        <select id="bili-quality" class="settings-select">
+          <option value="127" data-tag="大会员">8K / 4K</option>
+          <option value="120" data-tag="大会员">4K</option>
+          <option value="112" data-tag="大会员">1080P+</option>
+          <option value="80" selected>1080P</option>
+          <option value="64">720P</option>
+          <option value="32">480P</option>
+          <option value="16">360P</option>
+        </select>
+      </label>
+      <p class="settings-note" id="bili-note">Cookie 仅存在本地，通过本地代理转发给 B 站，不上传任何服务器。</p>
+    </section>
+
+    <section class="ld-card settings-block">
+      <h4>② DeepSeek · AI 学习助手</h4>
+      <p class="settings-desc">填入 API Key 即启用：学习助手问答、字幕摘要、出题自测。留空则用本地摘要兜底。还没有 Key？<a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">去申请 →</a></p>
+      <label class="field">
+        <span>API Key</span>
+        <input id="llm-key" type="password" placeholder="sk-..." spellcheck="false">
+      </label>
+      <label class="field">
+        <span>模型</span>
+        <select id="llm-model" class="settings-select">
+          <option value="deepseek-v4-flash" data-tag="推荐" selected>DeepSeek V4 Flash</option>
+          <option value="deepseek-v4-pro" data-tag="最强">DeepSeek V4 Pro</option>
+          <option value="deepseek-v4-flash-vision-exp" data-tag="实验">V4 Flash Vision</option>
+          <option value="deepseek-chat" data-tag="经典">DeepSeek Chat</option>
+          <option value="deepseek-reasoner" data-tag="思维链">DeepSeek Reasoner</option>
+        </select>
+      </label>
+      <div class="settings-actions">
+        <button class="ghost-btn" id="btn-test-conn">测试连接</button>
+        <button class="solid-btn" id="btn-save-settings">保存</button>
+      </div>
+      <p class="settings-note" id="conn-result">提示：请求已自动走本地代理转发（无需配置地址）。「测试连接」会用你填的 Key 与所选模型发一条消息，成功即代表 AI 功能可用。</p>
+    </section>
+
+    <section class="ld-card settings-block">
+      <h4>③ 外观 · 主题</h4>
+      <p class="settings-desc">自习室也可以换装——挑一间与你心境相合的书房。</p>
+      <div class="theme-picker" id="theme-picker">
+        <button class="theme-chip" data-theme-name="light" type="button">
+          <span class="theme-swatch sw-light"></span>
+          <span class="theme-name">宣纸自习室</span>
+          <span class="theme-desc">暖纸 · 经典黄</span>
+        </button>
+        <button class="theme-chip" data-theme-name="night" type="button">
+          <span class="theme-swatch sw-night"></span>
+          <span class="theme-name">深夜书房</span>
+          <span class="theme-desc">墨夜 · 灯火黄</span>
+        </button>
+        <button class="theme-chip" data-theme-name="green" type="button">
+          <span class="theme-swatch sw-green"></span>
+          <span class="theme-name">青绿笔记</span>
+          <span class="theme-desc">青绿 · 山色</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="ld-card settings-block">
+      <h4>④ 数据 · 备份与迁移</h4>
+      <p class="settings-desc">课程、学习记录与配置只存于当前浏览器。换设备或清理数据前先导出留档；换浏览器时导出后在新环境导入即可。</p>
+      <div class="settings-actions">
+        <button class="ghost-btn" id="btn-export-data">导出数据（JSON）</button>
+        <button class="ghost-btn" id="btn-import-data">导入数据</button>
+        <input type="file" id="import-file" accept="application/json,.json" hidden>
+      </div>
+      <p class="settings-note" id="data-note">导出的文件包含 API Key 与 B 站 Cookie，请妥善保管，勿外传。</p>
+      <div class="settings-actions" style="margin-top:14px">
+        <button class="ghost-btn" id="btn-show-guide">查看使用指南</button>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<!-- ============ 学习统计视图 ============ -->
+<main id="view-stats" class="view view--stats" hidden>
+  <div class="stats-topbar">
+    <button class="ghost-btn" id="btn-back-stats">← 返回</button>
+    <div class="stats-title">治学札记</div>
+    <button class="ghost-btn" id="btn-gen-report">生成学习报告</button>
+  </div>
+  <div class="stats-body" id="stats-body"></div>
+</main>
+
+<!-- ============ 年度报告遮罩 ============ -->
+<div class="year-report-mask" id="year-report" hidden>
+  <div class="year-report">
+    <button class="yr-close" id="btn-yr-close" aria-label="关闭">×</button>
+    <div class="yr-scroll" id="yr-body"></div>
+  </div>
+</div>
+
+<!-- ============ B 站扫码登录弹窗 ============ -->
+<div class="qr-modal" id="qr-modal" hidden>
+  <div class="qr-card">
+    <h5>B 站扫码登录</h5>
+    <div class="qr-img-wrap" id="qr-img-wrap">
+      <img id="qr-img" alt="扫码登录" />
+      <div class="qr-loading" id="qr-loading" hidden>
+        <span class="qr-spin"></span>
+        <span class="qr-load-text">生成中</span>
+      </div>
+      <div class="qr-expired" id="qr-expired" hidden>
+        <span>二维码已失效</span>
+        <button class="mini-btn" id="btn-qr-renew">重新生成</button>
+      </div>
+    </div>
+    <p class="qr-status" id="qr-status">请使用 B 站手机客户端扫码</p>
+    <button class="mini-btn" id="btn-qr-close">取消</button>
+  </div>
+</div>
+
+<!-- ============ AI 助手 / 笔记 抽屉 ============ -->
+<button class="asst-fab" id="btn-asst" title="AI 学习助手 / 笔记" hidden>
+  <span class="asst-fab-dot" id="asst-fab-dot"></span>
+  <span>AI 助手</span>
+</button>
+
+<aside class="asst-drawer" id="assistant-drawer" aria-hidden="true">
+  <div class="asst-head">
+    <div class="asst-tabs">
+      <button class="asst-tab is-active" data-tab="chat" id="asst-tab-chat">助手</button>
+      <button class="asst-tab" data-tab="notes" id="asst-tab-notes">笔记</button>
+    </div>
+    <button class="asst-x" id="btn-asst-close" aria-label="关闭">×</button>
+  </div>
+
+  <div class="asst-body">
+    <!-- 助手对话 -->
+    <div class="asst-pane" id="asst-chat">
+      <div class="asst-context" id="asst-context">—</div>
+      <div class="asst-messages" id="asst-messages"></div>
+      <div class="asst-input-row">
+        <textarea id="asst-input" rows="2" placeholder="随时提问，或写下你的想法让 AI 校验对错… (Enter 发送 / Shift+Enter 换行)"></textarea>
+        <button class="solid-btn" id="btn-asst-send">发送</button>
+      </div>
+    </div>
+    <!-- 笔记 -->
+    <div class="asst-pane" id="asst-notes" hidden>
+      <p class="asst-note-hint">按当前分 P 记录想法、疑问、灵光一现。<strong>AI 助手会读取这一 P 的笔记</strong>来校验你的思路。</p>
+      <textarea class="asst-note-area" id="note-area" placeholder="在这里写…自动保存。"></textarea>
+    </div>
+  </div>
+</aside>
+
+<!-- 首次使用引导 -->
+<div class="onboard-mask" id="onboard" hidden>
+  <div class="onboard-card">
+    <button class="onboard-x" id="btn-onboard-x" aria-label="跳过">×</button>
+    <div class="onboard-step" data-step="0">
+      <div class="onboard-glyph">◐</div>
+      <h3>把 B 站，变成你的自习室</h3>
+      <p>这里没有推荐流，没有弹幕轰炸。<br>只有你挑中的长视频，像书架上的书一样整齐陈列。</p>
+    </div>
+    <div class="onboard-step" data-step="1" hidden>
+      <div class="onboard-glyph">✦</div>
+      <h3>取一卷入架，开卷即专注</h3>
+      <p>粘贴 B 站链接，入架成藏书。<br>播放器隐去一切干扰，按分 P 目录推进，进度自动记下。</p>
+    </div>
+    <div class="onboard-step" data-step="2" hidden>
+      <div class="onboard-glyph">◔</div>
+      <h3>学完一卷，AI 为你复盘</h3>
+      <p>AI 摘要每一 P 的要点、去重旧知、出题自测；<br>学习足迹记入治学札记，坚持在日历上可见。</p>
+    </div>
+    <div class="onboard-nav">
+      <span class="onboard-dots"><i class="on"></i><i></i><i></i></span>
+      <button class="solid-btn" id="btn-onboard-next">开始</button>
+    </div>
+  </div>
+</div>
+
+<!-- 学习报告弹窗 -->
+<div class="report-mask" id="report-modal" hidden>
+  <div class="report-card">
+    <div class="report-head">
+      <h3>治学札记 · 学习报告</h3>
+      <button class="report-x" id="btn-report-close" aria-label="关闭">×</button>
+    </div>
+    <div class="report-body" id="report-body"></div>
+    <div class="report-foot">
+      <span class="copied" id="report-copied" hidden>✓ 已复制</span>
+      <button class="ghost-btn" id="btn-report-copy">复制报告</button>
+      <button class="solid-btn" id="btn-report-done">收下</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="app.js" defer=""></script>
+
+
+</body>
+</html>

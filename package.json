@@ -1,0 +1,12 @@
+{
+  "name": "deepreel",
+  "version": "1.0.0",
+  "description": "DEEPREEL · 深刷 —— 把 B 站变成你的自习室",
+  "private": true,
+  "scripts": {
+    "start": "node proxy.js"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}
