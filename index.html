@@ -170,11 +170,20 @@
           <div class="pc-progress" id="pc-seek">
             <div class="pc-buffered" id="pc-buffered"></div>
             <div class="pc-played" id="pp-fill"></div>
+            <div class="pc-thumb" id="pp-thumb"></div>
+            <div class="pc-bubble" id="pc-bubble" hidden></div>
           </div>
           <div class="pc-bar">
-            <button class="pc-btn" id="btn-play" title="播放/暂停">▶</button>
+            <button class="pc-btn pc-icon-btn" id="btn-play" title="播放/暂停" aria-label="播放/暂停">
+              <svg class="ic-play" viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>
+              <svg class="ic-pause" viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M7 5h3.6v14H7zM13.4 5H17v14h-3.6z"/></svg>
+            </button>
             <span class="pc-time" id="pp-time">0:00 / 0:00</span>
-            <button class="pc-btn" id="btn-mute" title="静音">静音</button>
+            <div class="pc-spacer"></div>
+            <button class="pc-btn pc-icon-btn" id="btn-mute" title="静音" aria-label="静音">
+              <svg class="ic-vol" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M17.8 6a8.5 8.5 0 0 1 0 12" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round"/></svg>
+              <svg class="ic-muted" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16 9l6 6M22 9l-6 6" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg>
+            </button>
             <input type="range" id="vol-slider" class="pc-vol" min="0" max="100" value="100" title="音量">
             <select class="pc-select" id="sel-speed" title="倍速">
               <option value="0.75">0.75x</option>
@@ -190,7 +199,9 @@
               <option value="32">480P</option>
               <option value="16">360P</option>
             </select>
-            <button class="pc-btn" id="btn-fscreen" title="全屏">全屏</button>
+            <button class="pc-btn pc-icon-btn" id="btn-fscreen" title="全屏" aria-label="全屏">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+            </button>
           </div>
         </div>
         <div class="player-focus-tip" id="player-focus-tip">

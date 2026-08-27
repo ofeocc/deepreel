@@ -1314,8 +1314,8 @@ class PlayerBridge{
       this.setTime(t);
     });
     v.addEventListener('ended', ()=> this.onEnded());
-    v.addEventListener('play', ()=> { const b=qs('#btn-play'); if(b) b.textContent='⏸'; this._started=true; this._pauseAt=null; });
-    v.addEventListener('pause', ()=> { const b=qs('#btn-play'); if(b) b.textContent='▶'; if(this._started && this._pauseAt==null) this._pauseAt = Date.now(); });
+    v.addEventListener('play', ()=> { const b=qs('#btn-play'); if(b) b.classList.add('is-playing'); this._started=true; this._pauseAt=null; });
+    v.addEventListener('pause', ()=> { const b=qs('#btn-play'); if(b) b.classList.remove('is-playing'); if(this._started && this._pauseAt==null) this._pauseAt = Date.now(); });
     v.addEventListener('progress', ()=> this.updateBuffered());
     v.addEventListener('waiting', ()=> this.showLoading(true));
     v.addEventListener('canplay', ()=> this.showLoading(false));
@@ -1943,6 +1943,7 @@ class PlayerBridge{
     const t = this.cur.time||0;
     const ratio = c>0 ? Math.min(1, t/c) : (this.cur.done?1:0);
     qs('#pp-fill').style.width = (ratio*100)+'%';
+    const th = qs('#pp-thumb'); if(th) th.style.left = (ratio*100)+'%';
     qs('#pp-time').textContent = `${fmtTime(t)} / ${fmtTime(c)}`;
   }
   play(){ this.video.play(); }
@@ -2934,13 +2935,13 @@ function bind(){
   qs('#btn-mute').addEventListener('click', ()=>{
     const v = qs('#player-video'); if(!v) return;
     v.muted = !v.muted;
-    qs('#btn-mute').textContent = v.muted ? '取消静音' : '静音';
+    qs('#btn-mute').classList.toggle('is-muted', v.muted);
   });
   qs('#vol-slider').addEventListener('input', e=>{
     const v = qs('#player-video'); if(!v) return;
     v.volume = e.target.value/100;
     v.muted = false;
-    qs('#btn-mute').textContent = '静音';
+    qs('#btn-mute').classList.remove('is-muted');
     state.settings.volume = v.volume;
     saveSettings();
   });
@@ -2956,17 +2957,37 @@ function bind(){
 
   // 视频进度条点击/拖动跳转
   const seek = qs('#pc-seek');
+  const bubble = qs('#pc-bubble');
   if(seek){
     let dragging = false;
+    const ratioAt = e=>{
+      const rect = seek.getBoundingClientRect();
+      return Math.max(0, Math.min(1, (e.clientX-rect.left)/rect.width));
+    };
     const seekTo = e=>{
       if(!player || !player.cur.duration) return;
-      const rect = seek.getBoundingClientRect();
-      const ratio = Math.max(0, Math.min(1, (e.clientX-rect.left)/rect.width));
-      player.seekTo(ratio * player.cur.duration);
+      const r = ratioAt(e);
+      player.seekTo(r * player.cur.duration);
     };
-    seek.addEventListener('pointerdown', e=>{ dragging=true; seek.setPointerCapture(e.pointerId); seekTo(e); });
-    seek.addEventListener('pointermove', e=>{ if(dragging) seekTo(e); });
-    seek.addEventListener('pointerup', ()=>{ dragging=false; });
+    const showBubble = e=>{
+      if(!bubble || !player || !player.cur.duration) return;
+      const r = ratioAt(e);
+      bubble.textContent = fmtTime(Math.floor(r * player.cur.duration));
+      bubble.style.left = (r*100)+'%';
+      bubble.hidden = false;
+    };
+    const hideBubble = ()=>{ if(bubble) bubble.hidden = true; };
+    seek.addEventListener('pointerdown', e=>{
+      dragging=true;
+      seek.classList.add('dragging');
+      if(player && player.flashControls) player.flashControls();   // 拖动期间不自动隐藏控制条
+      seek.setPointerCapture(e.pointerId);
+      showBubble(e);
+      seekTo(e);
+    });
+    seek.addEventListener('pointermove', e=>{ if(dragging){ showBubble(e); seekTo(e); } });
+    seek.addEventListener('pointerup', ()=>{ dragging=false; seek.classList.remove('dragging'); hideBubble(); });
+    seek.addEventListener('pointercancel', ()=>{ dragging=false; seek.classList.remove('dragging'); hideBubble(); });
   }
 
   // 键盘快捷键
