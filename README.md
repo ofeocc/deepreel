@@ -2,7 +2,20 @@
 
 > 把 B 站变成你的自习室 —— 专注、持续、深度、沉浸学习。
 
+![version](https://img.shields.io/badge/version-1.0.0-14110B?style=flat)
+![license](https://img.shields.io/github/license/ofeocc/deepreel)
+![language](https://img.shields.io/github/languages/top/ofeocc/deepreel)
+![stars](https://img.shields.io/github/stars/ofeocc/deepreel)
+![last commit](https://img.shields.io/github/last-commit/ofeocc/deepreel)
+![pages](https://img.shields.io/github/deployments/ofeocc/deepreel/github-pages)
+
 导入你挑中的长视频，屏蔽推荐与干扰，按分 P 像目录一样推进进度；AI 帮你摘要「学到了什么」，已学知识不再重复刷。学习足迹记入治学札记，坚持在日历上可见。
+
+## 🌐 在线演示
+
+<https://ofeocc.github.io/deepreel/>
+
+> 在线演示为界面预览：浏览 / 导入 / 封面 / 示例课程可用；**视频解析、AI 摘要、高清画质需本地代理**（浏览器 CORS 限制），请克隆到本地运行以获得完整体验。
 
 ## ✨ 特性
 
