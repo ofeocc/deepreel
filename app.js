@@ -66,7 +66,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.3.0'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.3.1'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -1314,8 +1314,8 @@ class PlayerBridge{
       this.setTime(t);
     });
     v.addEventListener('ended', ()=> this.onEnded());
-    v.addEventListener('play', ()=> { const b=qs('#btn-play'); if(b) b.textContent='暂停'; this._started=true; this._pauseAt=null; });
-    v.addEventListener('pause', ()=> { const b=qs('#btn-play'); if(b) b.textContent='播放'; if(this._started && this._pauseAt==null) this._pauseAt = Date.now(); });
+    v.addEventListener('play', ()=> { const b=qs('#btn-play'); if(b) b.textContent='⏸'; this._started=true; this._pauseAt=null; });
+    v.addEventListener('pause', ()=> { const b=qs('#btn-play'); if(b) b.textContent='▶'; if(this._started && this._pauseAt==null) this._pauseAt = Date.now(); });
     v.addEventListener('progress', ()=> this.updateBuffered());
     v.addEventListener('waiting', ()=> this.showLoading(true));
     v.addEventListener('canplay', ()=> this.showLoading(false));
@@ -1328,34 +1328,37 @@ class PlayerBridge{
     });
     v.addEventListener('loadstart', ()=> reportDebug('video-loadstart'));
     v.addEventListener('loadedmetadata', ()=> reportDebug('video-loadedmeta dur=' + (this.video.duration||0)));
-    // 触屏：单击播放/暂停，双击快进(+10s)/快退(-10s)；鼠标：单击切播放、双击忽略
+    // 触屏（B站式）：单击=即时播放/暂停；300ms 内第二击=撤销单击切换+快进快退10s
     this._touchMode = ('ontouchstart' in window) || (window.matchMedia && window.matchMedia('(hover:none)').matches);
-    this._tapT = null; this._lastTap = 0; this._skipClick = false;
+    this._lastTap = 0; this._tapToggleApplied = false; this._wasPlaying = false;
     v.addEventListener('pointerup', e=>{
       if(e.pointerType !== 'touch') return;
       if(e.target.closest('.player-controls')) return;
       const now = Date.now();
       if(now - this._lastTap < 300){
-        clearTimeout(this._tapT); this._tapT = null; this._lastTap = 0;
+        // 双击：撤销单击造成的播放/暂停切换，然后快进/快退
+        this._lastTap = 0;
+        if(this._tapToggleApplied){
+          try{ this.video[this._wasPlaying ? 'play' : 'pause'](); }catch{}
+          this._tapToggleApplied = false;
+        }
         const r = this.wrap.getBoundingClientRect();
         const x = e.clientX - r.left;
-        this.seekTo((this.cur.time||0) + (x < r.width/2 ? -10 : 10));
-        this._skipClick = true;
+        const delta = x < r.width/2 ? -10 : 10;
+        this.seekTo((this.cur.time||0) + delta);
+        this.showSeekFeedback(delta);
         this.flashControls();
         return;
       }
       this._lastTap = now;
-      clearTimeout(this._tapT);
-      this._tapT = setTimeout(()=>{
-        this._tapT = null; this._lastTap = 0;
-        if(this.mode && !this.cur.simulate) this.togglePlay();
-        this.flashControls();
-      }, 280);
+      this._wasPlaying = !this.video.paused;
+      this._tapToggleApplied = true;
+      if(this.mode && !this.cur.simulate) this.togglePlay();
+      this.flashControls();
     });
     v.addEventListener('click', e=>{
-      if(this._skipClick){ this._skipClick = false; return; }
       if(e.detail > 1) return;
-      if(this._touchMode) return;   // 触屏单击已由 pointerup 定时处理
+      if(this._touchMode) return;   // 触屏单击已由 pointerup 即时处理
       if(this.mode && !this.cur.simulate) this.togglePlay();
     });
     this.wrap.addEventListener('pointerdown', e=>{ if(e.pointerType==='touch') this.flashControls(); });
@@ -1365,6 +1368,16 @@ class PlayerBridge{
     this.wrap.classList.add('show-controls');
     clearTimeout(this._ctlTimer);
     this._ctlTimer = setTimeout(()=> this.wrap.classList.remove('show-controls'), 3000);
+  }
+  /* 双击快进/快退的 +10s 提示（B站式） */
+  showSeekFeedback(delta){
+    const el = qs('#seek-feedback');
+    if(!el) return;
+    el.textContent = (delta > 0 ? '+' : '') + delta + 's';
+    el.hidden = false;
+    el.classList.remove('anim'); void el.offsetWidth; el.classList.add('anim');
+    clearTimeout(this._fbTimer);
+    this._fbTimer = setTimeout(()=>{ el.hidden = true; }, 750);
   }
   proxyBase(){ return proxyBase(); }
   cookie(){ return biliCookie(); }

@@ -172,7 +172,7 @@
             <div class="pc-played" id="pp-fill"></div>
           </div>
           <div class="pc-bar">
-            <button class="pc-btn" id="btn-play" title="播放/暂停">播放</button>
+            <button class="pc-btn" id="btn-play" title="播放/暂停">▶</button>
             <span class="pc-time" id="pp-time">0:00 / 0:00</span>
             <button class="pc-btn" id="btn-mute" title="静音">静音</button>
             <input type="range" id="vol-slider" class="pc-vol" min="0" max="100" value="100" title="音量">
@@ -199,6 +199,8 @@
         <div class="player-loading" id="player-loading" hidden>
           <span class="sk-loader"></span> 正在加载视频…
         </div>
+        <!-- 双击快进/快退提示 -->
+        <div class="seek-feedback" id="seek-feedback" hidden>+10s</div>
       </div>
 
       <!-- 当前分 P 控制条 -->
@@ -370,7 +372,7 @@
       <p class="settings-note" id="wd-note">数据先经 AES-256 加密再上传，网盘只保存密文。同步需在安全环境（本机 file://、localhost 或 https）使用；加密口令丢失将无法解密，请务必牢记。</p>
     </section>
 
-    <p class="settings-note" style="text-align:center; margin-top:26px; color:var(--ink-mute)">DEEPREEL v1.3.0 · 数据仅存于本地浏览器，可随时导出备份</p>
+    <p class="settings-note" style="text-align:center; margin-top:26px; color:var(--ink-mute)">DEEPREEL v1.3.1 · 数据仅存于本地浏览器，可随时导出备份</p>
 
   </div>
 </main>
