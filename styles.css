@@ -1373,6 +1373,7 @@ html.theme-fade .modal, html.theme-fade .mini-modal-mask{
 .onboard-dots i.on{ background:var(--accent-deep); transform:scale(1.3); }
 .onboard-x{ position:absolute; top:14px; right:18px; background:none; border:none; font-size:22px; color:var(--ink-mute); cursor:pointer; line-height:1; }
 .onboard-x:hover{ color:var(--ink); }
+.onboard-mask[hidden]{ display:none !important; }
 
 /* ============================================================
    学习报告弹窗
@@ -1396,6 +1397,7 @@ html.theme-fade .modal, html.theme-fade .mini-modal-mask{
 .report-body .rp-rule{ margin:14px 0; height:1px; background:var(--line-soft); }
 .report-foot{ padding:14px 24px; border-top:1px solid var(--line-soft); display:flex; justify-content:flex-end; gap:10px; }
 .report-foot .copied{ color:var(--ok); font-size:12px; align-self:center; font-family:var(--font-mono); }
+.report-mask[hidden]{ display:none !important; }
 
 /* ============================================================
    质感打磨：课程卡 hover / 封面 / 置顶卡
