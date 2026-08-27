@@ -1449,7 +1449,7 @@ class PlayerBridge{
     const key = `${bvid}|${cid}|${this.quality()}|${fnval}`;
     if(this.playurlCache.has(key)) return this.playurlCache.get(key);
     const ctl = new AbortController();
-    const timer = setTimeout(()=>ctl.abort(), 15000);   // 拉流地址 15s 超时（冷启动可能较慢）
+    const timer = setTimeout(()=>ctl.abort(), 20000);   // 拉流地址 20s 超时（冷启动+网络波动）
     try{
       const r = await fetch(`${this.proxyBase()}/bili/playurl?bvid=${bvid}&cid=${cid}&qn=${this.quality()}&fnval=${fnval}&fnver=0&fourk=1`, { headers: { 'X-Bili-Cookie': this.cookie() }, signal: ctl.signal });
       const j = await r.json();

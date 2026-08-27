@@ -26,6 +26,10 @@ const PORT = process.env.DEEPREEL_PORT || 7392;
 const DS_UPSTREAM = process.env.DEEPREEL_UPSTREAM || 'api.deepseek.com';
 const BILI_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+/* 全局 keep-alive：常驻连接避免每个请求冷启动（DNS/TLS），
+   实测空闲后首个请求常超 20s、热连接 200ms —— 保持连接可根治 */
+https.globalAgent = new https.Agent({ keepAlive: true, maxSockets: 8, keepAliveMsecs: 30000 });
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS, GET, PUT, MKCOL, DELETE',
@@ -110,6 +114,14 @@ http.createServer(handler).on('error', (err) => {
     warm.on('error', () => {});
     warm.end();
   } catch {}
+  /* 常驻保活：每 20s 轻连一次 B站，让 keep-alive 连接不被回收（杜绝冷启动超时） */
+  setInterval(() => {
+    try {
+      const ping = https.request({ host: 'api.bilibili.com', path: '/x/web-interface/nav', method: 'HEAD' }, () => {});
+      ping.on('error', () => {});
+      ping.end();
+    } catch {}
+  }, 20000);
 });
 
 /* ---------- HTTPS 服务（局域网/手机 7443，需 certs/ 证书） ---------- */
@@ -144,6 +156,7 @@ function handleWebdav(req, res, parsed) {
   const auth = req.headers['x-webdav-auth'] || '';
   const rawHost = req.headers['x-webdav-host'] || 'dav.jianguoyun.com';
   const fwdPath = req.headers['x-webdav-path'] || `/dav/${parsed.pathname.replace(/^\/webdav\//, '')}`;
+  logLine(`[webdav] req from=${req.socket.remoteAddress} method=${req.method} path=${fwdPath} auth=${auth ? 'yes' : 'no'}`);
   if (!auth) {
     res.writeHead(401, { 'Content-Type': 'application/json', ...CORS });
     return res.end(JSON.stringify({ code: 401, message: 'missing X-Webdav-Auth' }));
