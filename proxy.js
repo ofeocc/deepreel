@@ -73,6 +73,15 @@ http.createServer((req, res) => {
   } else {
     serveStatic(req, res, path);
   }
+}).on('error', (err) => {
+  /* 端口已被占用：代理多半已在运行，直接打开应用即可，不必报错 */
+  if (err && err.code === 'EADDRINUSE') {
+    console.log(`\n  端口 ${PORT} 已被占用 —— 代理似乎已经在运行。`);
+    console.log(`  直接打开应用：http://localhost:${PORT}/\n`);
+    if (!process.env.DEEPREEL_NO_OPEN) openBrowser(`http://localhost:${PORT}/`);
+    process.exit(0);
+  }
+  throw err;
 }).listen(PORT, () => {
   const url = `http://localhost:${PORT}/`;
   console.log(`\n  DEEPREEL 代理 v3 已启动`);
