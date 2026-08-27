@@ -509,10 +509,13 @@ body{
 .wo-text{ font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); min-width:38px; }
 
 .watch-main{ display:grid; grid-template-columns:1fr 360px; gap:22px; align-items:start; max-width:1440px; margin-inline:auto; }
+/* grid 子项允许收缩：防止视频固有分辨率把列撑成网页版宽度 */
+.watch-main > *{ min-width:0; }
 @media(max-width:1000px){ .watch-main{ grid-template-columns:1fr; } }
 
 /* 播放器 */
-.player-wrap{ display:flex; flex-direction:column; gap:14px; position:sticky; top:84px; }
+.player-wrap{ display:flex; flex-direction:column; gap:14px; position:sticky; top:84px; min-width:0; }
+.player-frame-wrap{ width:100%; }
 @media(max-width:1000px){ .player-wrap{ position:static; } }
 .player-frame-wrap{
   position:relative; aspect-ratio:16/9; background:#000; border-radius:var(--r);
