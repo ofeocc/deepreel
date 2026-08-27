@@ -57,7 +57,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.1.1'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.2.0'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -2588,6 +2588,11 @@ function openSettings(){
   const bq = qs('#bili-quality'); if(bq) bq.value = s.biliQuality || '80';
   syncCSelect(qs('#llm-model'));
   syncCSelect(bq);
+  /* WebDAV 同步字段 */
+  const wd = qs('#wd-url'); if(wd) wd.value = s.webdavUrl || 'https://dav.jianguoyun.com/dav/';
+  const wu = qs('#wd-user'); if(wu) wu.value = s.webdavUser || '';
+  const wp = qs('#wd-pass'); if(wp) wp.value = s.webdavPass || '';
+  const wk = qs('#wd-key'); if(wk) wk.value = s.webdavKey || '';
   updateBiliLoginUI();
   showView('settings');
 }
@@ -3062,6 +3067,115 @@ function importData(file){
   reader.readAsText(file);
 }
 
+/* ============ WebDAV 云同步（加密备份到网盘） ============ */
+function b64(u8){ let s=''; for(let i=0;i<u8.length;i++) s+=String.fromCharCode(u8[i]); return btoa(s); }
+function fromB64(s){ const bin=atob(s); const u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return u8; }
+async function wdDeriveKey(pass, salt){
+  const km = await crypto.subtle.importKey('raw', new TextEncoder().encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt, iterations:150000, hash:'SHA-256' },
+    km, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']
+  );
+}
+async function wdEncrypt(obj, pass){
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await wdDeriveKey(pass, salt);
+  const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(obj)));
+  return JSON.stringify({ v:1, salt:b64(salt), iv:b64(iv), data:b64(new Uint8Array(ct)) });
+}
+async function wdDecrypt(text, pass){
+  const j = JSON.parse(text);
+  const key = await wdDeriveKey(pass, fromB64(j.salt));
+  const pt = await crypto.subtle.decrypt({ name:'AES-GCM', iv:fromB64(j.iv) }, key, fromB64(j.data));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+/* 经本地代理转发 WebDAV 请求（浏览器直连被 CORS 拦） */
+async function wdFetch(method, rel, body){
+  const s = state.settings;
+  const baseUrl = (s.webdavUrl && /^https?:\/\//.test(s.webdavUrl)) ? s.webdavUrl : 'https://dav.jianguoyun.com/dav/';
+  const u = new URL(rel, baseUrl.endsWith('/') ? baseUrl : baseUrl + '/');
+  const auth = 'Basic ' + btoa(unescape(encodeURIComponent((s.webdavUser||'') + ':' + (s.webdavPass||''))));
+  const opt = {
+    method,
+    headers: { 'X-Webdav-Auth': auth, 'X-Webdav-Host': u.host, 'X-Webdav-Path': u.pathname + u.search, 'X-Webdav-Scheme': u.protocol === 'http:' ? 'http' : 'https' },
+  };
+  if(body !== undefined){ opt.headers['Content-Type'] = 'application/octet-stream'; opt.body = body; }
+  return fetch(`${proxyBase()}/webdav/${rel}`, opt);
+}
+function wdNote(msg, isErr){
+  const el = qs('#wd-note');
+  if(!el) return;
+  el.textContent = msg;
+  el.classList.toggle('err', !!isErr);
+}
+/* 从设置表单读取 WebDAV 配置并保存 */
+function readWdFields(){
+  const s = state.settings;
+  const url = qs('#wd-url'), user = qs('#wd-user'), pass = qs('#wd-pass'), key = qs('#wd-key');
+  if(url) s.webdavUrl = url.value.trim() || 'https://dav.jianguoyun.com/dav/';
+  if(user) s.webdavUser = user.value.trim();
+  if(pass) s.webdavPass = pass.value;
+  if(key) s.webdavKey = key.value;
+  saveSettings();
+}
+function wdBuildBackup(){
+  return {
+    app:'deepreel', version:1, exportedAt:new Date().toISOString(),
+    courses:state.courses, settings:state.settings, activity:state.activity, hourDist:state.hourDist,
+  };
+}
+async function wdUpload(){
+  const s = state.settings;
+  if(!s.webdavUser || !s.webdavPass){ wdNote('请先填写 WebDAV 账号与应用密码', true); return; }
+  if(!s.webdavKey){ wdNote('请设置加密口令（用于加密备份）', true); return; }
+  if(!crypto || !crypto.subtle){ wdNote('当前环境不支持加密（需 https 或本机访问），无法同步', true); return; }
+  wdNote('正在加密并上传…');
+  try{
+    const enc = await wdEncrypt(wdBuildBackup(), s.webdavKey);
+    let r = await wdFetch('PUT', 'DeepReel/backup.json', enc);
+    if(r.status === 409){
+      await wdFetch('MKCOL', 'DeepReel');
+      r = await wdFetch('PUT', 'DeepReel/backup.json', enc);
+    }
+    if(!r.ok && r.status !== 201 && r.status !== 204) throw new Error('HTTP '+r.status);
+    s.wdLastSync = new Date().toISOString();
+    saveSettings();
+    wdNote('✓ 已加密上传到云端（'+s.wdLastSync.slice(0,16).replace('T',' ')+'）');
+    toast('云备份已更新');
+  }catch(e){
+    wdNote('上传失败：'+(e.message||'网络错误')+'。请确认代理已启动、账号密码正确', true);
+  }
+}
+async function wdDownload(){
+  const s = state.settings;
+  if(!s.webdavUser || !s.webdavPass){ wdNote('请先填写 WebDAV 账号与应用密码', true); return; }
+  if(!crypto || !crypto.subtle){ wdNote('当前环境不支持加密（需 https 或本机访问），无法同步', true); return; }
+  wdNote('正在下载并解密…');
+  try{
+    const r = await wdFetch('GET', 'DeepReel/backup.json');
+    if(r.status === 404){ wdNote('云端还没有备份，先点「↑ 上传备份」', true); return; }
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    let backup;
+    try{ backup = await wdDecrypt(await r.text(), s.webdavKey); }
+    catch(e){ throw new Error('解密失败：加密口令不对或数据已损坏'); }
+    if(!backup || backup.app !== 'deepreel') throw new Error('云端文件不是 DEEPREEL 备份');
+    /* 保留当前 WebDAV 凭据，避免被云端旧配置覆盖 */
+    const keep = { webdavUrl:s.webdavUrl, webdavUser:s.webdavUser, webdavPass:s.webdavPass, webdavKey:s.webdavKey };
+    if(Array.isArray(backup.courses)){ state.courses = backup.courses; saveCourses(); }
+    if(backup.settings && typeof backup.settings === 'object'){ Object.assign(state.settings, backup.settings); saveSettings(); }
+    if(backup.activity && typeof backup.activity === 'object'){ state.activity = backup.activity; saveActivity(); }
+    if(Array.isArray(backup.hourDist) && backup.hourDist.length === 24){ state.hourDist = backup.hourDist; saveHours(); }
+    Object.assign(state.settings, keep);
+    applyTheme(state.settings.theme || 'light', false);
+    renderLibrary();
+    wdNote('✓ 已从云端恢复（备份时间 '+(backup.exportedAt||'?').slice(0,16).replace('T',' ')+'）');
+    toast('云端数据已恢复');
+  }catch(e){
+    wdNote('下载失败：'+(e.message||'网络错误')+'。请确认代理已启动、账号密码正确', true);
+  }
+}
+
 /* ============ 学习报告 ============ */
 function openLearningReport(){
   const now = new Date();
@@ -3150,6 +3264,9 @@ function bindUpgrades(){
     fileToDataURL(f).then(setAsstImg).catch(err=>toast('截图读取失败：'+(err.message||'')));
   });
   qs('#btn-asst-img-clear').addEventListener('click', clearAsstImg);
+  /* WebDAV 云同步 */
+  qs('#btn-wd-upload').addEventListener('click', ()=>{ readWdFields(); wdUpload(); });
+  qs('#btn-wd-download').addEventListener('click', ()=>{ readWdFields(); wdDownload(); });
   /* 全屏对话 + 快捷提问 + 抽屉调宽 */
   qs('#btn-asst-focus').addEventListener('click', ()=>toggleAsstFocus());
   qs('#asst-quick').addEventListener('click', e=>{

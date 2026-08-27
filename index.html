@@ -344,7 +344,33 @@
       </div>
     </section>
 
-    <p class="settings-note" style="text-align:center; margin-top:26px; color:var(--ink-mute)">DEEPREEL v1.1.1 · 数据仅存于本地浏览器，可随时导出备份</p>
+    <section class="ld-card settings-block">
+      <h4>⑤ 云同步 · WebDAV（可选）</h4>
+      <p class="settings-desc">把课程、进度、配置<strong>加密后</strong>备份到你的网盘（如坚果云），换设备/清缓存后一键恢复。坚果云需在「账户信息 → 安全选项」生成<strong>应用密码</strong>（非登录密码）。</p>
+      <label class="field">
+        <span>WebDAV 地址</span>
+        <input id="wd-url" value="https://dav.jianguoyun.com/dav/" spellcheck="false">
+      </label>
+      <label class="field">
+        <span>账号（邮箱）</span>
+        <input id="wd-user" placeholder="you@example.com" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="field">
+        <span>应用密码</span>
+        <input id="wd-pass" type="password" placeholder="坚果云应用密码（非登录密码）" autocomplete="new-password" spellcheck="false">
+      </label>
+      <label class="field">
+        <span>加密口令</span>
+        <input id="wd-key" type="password" placeholder="加密备份用，请牢记（可不同于网盘密码）" autocomplete="new-password" spellcheck="false">
+      </label>
+      <div class="settings-actions">
+        <button class="ghost-btn" id="btn-wd-upload">↑ 上传备份</button>
+        <button class="ghost-btn" id="btn-wd-download">↓ 下载恢复</button>
+      </div>
+      <p class="settings-note" id="wd-note">数据先经 AES-256 加密再上传，网盘只保存密文。同步需在安全环境（本机 file://、localhost 或 https）使用；加密口令丢失将无法解密，请务必牢记。</p>
+    </section>
+
+    <p class="settings-note" style="text-align:center; margin-top:26px; color:var(--ink-mute)">DEEPREEL v1.2.0 · 数据仅存于本地浏览器，可随时导出备份</p>
 
   </div>
 </main>

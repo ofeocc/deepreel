@@ -27,8 +27,8 @@ const BILI_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (K
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Bili-Cookie',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS, GET, PUT, MKCOL, DELETE',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Bili-Cookie, X-Webdav-Auth, X-Webdav-Host, X-Webdav-Path, X-Webdav-Scheme',
   'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
   'Access-Control-Max-Age': '86400',
 };
@@ -70,6 +70,8 @@ http.createServer((req, res) => {
     handleBiliStream(req, res, parsed);
   } else if (path === '/bili/img') {
     handleBiliImg(req, res, parsed);
+  } else if (path.startsWith('/webdav/')) {
+    handleWebdav(req, res, parsed);
   } else {
     serveStatic(req, res, path);
   }
@@ -92,6 +94,42 @@ http.createServer((req, res) => {
   console.log(`  按 Ctrl+C 停止\n`);
   if (!process.env.DEEPREEL_NO_OPEN) openBrowser(url);
 });
+
+/* ============ WebDAV 云同步转发 ============ */
+/* 浏览器直连坚果云 WebDAV 会被 CORS 拦，经本地代理转发。
+   前端传 X-Webdav-Auth（Basic 凭据）、X-Webdav-Host、X-Webdav-Path。 */
+function handleWebdav(req, res, parsed) {
+  const auth = req.headers['x-webdav-auth'] || '';
+  const rawHost = req.headers['x-webdav-host'] || 'dav.jianguoyun.com';
+  const fwdPath = req.headers['x-webdav-path'] || `/dav/${parsed.pathname.replace(/^\/webdav\//, '')}`;
+  if (!auth) {
+    res.writeHead(401, { 'Content-Type': 'application/json', ...CORS });
+    return res.end(JSON.stringify({ code: 401, message: 'missing X-Webdav-Auth' }));
+  }
+  let host = rawHost, port = 443, useHttps = true;
+  const hc = rawHost.match(/^(.*):(\d+)$/);
+  if (hc){ host = hc[1]; port = parseInt(hc[2], 10); }
+  if (req.headers['x-webdav-scheme'] === 'http') useHttps = false;
+  const method = req.method || 'GET';
+  const headers = {
+    'Authorization': auth,
+    'User-Agent': 'DeepReel/1.0',
+    'Accept': '*/*',
+  };
+  if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
+  const transport = useHttps ? https : http;
+  const proxyReq = transport.request({ host, port, path: fwdPath, method, headers }, up => {
+    /* 上游自带 CORS 头时剥掉，避免叠加 */
+    const respHeaders = { ...stripCors(up.headers), ...CORS };
+    res.writeHead(up.statusCode || 200, respHeaders);
+    up.pipe(res);
+  });
+  proxyReq.on('error', e => {
+    res.writeHead(502, { 'Content-Type': 'application/json', ...CORS });
+    res.end(JSON.stringify({ code: -1, message: 'webdav_upstream_error: ' + String(e && e.message || e) }));
+  });
+  req.pipe(proxyReq);
+}
 
 /* ============ 静态文件托管（让 npm start 直接打开完整应用） ============ */
 const MIME = {
