@@ -235,6 +235,12 @@ function initMotion(){
       requestAnimationFrame(raf);
     }catch{ lenis=null; }
   }
+  /* 内部滚动容器不被 Lenis 劫持：悬停时暂停页面平滑滚动，离开后恢复 */
+  qsa('.asst-drawer, .asst-messages, .toc, .report-body, .yr-scroll').forEach(el=>{
+    el.addEventListener('wheel', ()=>{ if(lenis) lenis.stop(); }, { passive:true });
+    el.addEventListener('mouseenter', ()=>{ if(lenis) lenis.stop(); }, { passive:true });
+    el.addEventListener('mouseleave', ()=>{ if(lenis) lenis.start(); }, { passive:true });
+  });
 }
 function reveal(sel, opts={}){
   if(!window.gsap) return;
@@ -1377,13 +1383,20 @@ class PlayerBridge{
     const spd = qs('#sel-speed');
     if(spd) this.video.playbackRate = parseFloat(spd.value) || 1;
     if(state.settings.volume != null) this.video.volume = state.settings.volume;
+    /* 预取下一分 P 的播放地址：切 P 时秒开 */
+    const np = c.parts[idx+1];
+    if(np && np.cid) this.fetchPlayurl(c.bvid, np.cid, 16).catch(()=>{});
     this.startPolling();
   }
 
   async fetchPlayurl(bvid, cid, fnval){
+    if(!this.playurlCache) this.playurlCache = new Map();
+    const key = `${bvid}|${cid}|${this.quality()}|${fnval}`;
+    if(this.playurlCache.has(key)) return this.playurlCache.get(key);
     const r = await fetch(`${this.proxyBase()}/bili/playurl?bvid=${bvid}&cid=${cid}&qn=${this.quality()}&fnval=${fnval}&fnver=0&fourk=1`, { headers: { 'X-Bili-Cookie': this.cookie() } });
     const j = await r.json();
     if(j.code !== 0 || !j.data) throw new Error(j.message || '接口错误');
+    this.playurlCache.set(key, j.data);
     return j.data;
   }
 
@@ -2038,9 +2051,19 @@ async function getPartText(c, p){
   if(c.isSample) return p.text || p.part;
   if(p.cid){
     const sub = await fetchSubtitle(c.bvid, p.cid);
-    if(sub && sub.body) return sub.body.map(b=>b.content).join(' ');
+    if(sub && sub.body){
+      /* 保留带时间戳的字幕原文（位置感知用），文本摘录照旧 */
+      if(!p._subRaw) p._subRaw = sub;
+      return sub.body.map(b=>b.content).join(' ');
+    }
   }
   return p.part + '。' + (c.title||'') + '。'; // 退化为标题
+}
+/* 提取「当前播放位置」附近的字幕片段（前后各 90 秒，取最近 12 条） */
+function subtitleAround(p, t){
+  if(!p._subRaw || !Array.isArray(p._subRaw.body)) return '';
+  const seg = p._subRaw.body.filter(b=> b.from <= t + 90 && (b.to||b.from + 8) >= t - 90);
+  return seg.slice(-12).map(b=>b.content).join(' ');
 }
 
 function buildKeywordIndex(c){
@@ -2135,13 +2158,46 @@ async function llmSummarize(text, s, onDelta){
 let assistantThinking = false;
 let assistantStreamCtx = null;
 let noteSaveTimer = null;
+let asstCtxTimer = null;
+let asstImgData = null;   // 待发送的截图 dataURL（vision）
 
-async function llmChat(messages, onDelta){
-  const s = state.settings;
+/* 截图上传：压缩为 ≤1280px 的 JPEG dataURL */
+function fileToDataURL(file, maxW=1280){
+  return new Promise((resolve, reject)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{
+      try{
+        const scale = Math.min(1, maxW / (img.width||1));
+        const cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round(img.width*scale));
+        cv.height = Math.max(1, Math.round(img.height*scale));
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        resolve(cv.toDataURL('image/jpeg', 0.82));
+      }catch(e){ URL.revokeObjectURL(url); reject(e); }
+    };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
+    img.src = url;
+  });
+}
+function setAsstImg(dataUrl){
+  asstImgData = dataUrl;
+  const chip = qs('#asst-img-chip');
+  if(chip){
+    chip.hidden = !dataUrl;
+    chip.querySelector('.asst-img-thumb').style.backgroundImage = dataUrl ? `url('${dataUrl}')` : '';
+    chip.querySelector('.asst-img-name').textContent = dataUrl ? '已附加截图，随下一条消息发送' : '';
+  }
+}
+function clearAsstImg(){ setAsstImg(null); }
+
+async function llmChat(messages, onDelta, sOverride){
+  const s = sOverride ? Object.assign({}, state.settings, sOverride) : state.settings;
   return await requestLLM(s, messages, { temperature:0.4, stream:true, onDelta });
 }
 
-async function buildAssistantMessages(userText, c = activeCourse(), p = c && c.parts[state.activePart]){
+async function buildAssistantMessages(userText, c = activeCourse(), p = c && c.parts[state.activePart], imgData = null){
   if(!c || !p) throw new Error('NO_COURSE');
   let ctx;
   if(p._summary){ ctx = `本 P 摘要：${p._summary}`; }
@@ -2150,9 +2206,22 @@ async function buildAssistantMessages(userText, c = activeCourse(), p = c && c.p
     ctx = `本 P 字幕摘录：${(p._subText||'').slice(0, 3000)}`;
   }
   const note = p.note ? `\n学生本 P 笔记：${p.note}` : '';
-  const sys = `你是 DEEPREEL 学习助手。学生正在 B 站学习《${c.title}》的第 ${p.page} P《${p.part}》。请基于以下该分 P 的内容回答疑问、校验学生的想法并明确指出哪里想错了；简洁、直接、点到为止，不要寒暄。\n\n${ctx}${note}`;
+  /* 位置感知：当前播放时间 + 该时刻附近字幕 + 课程进度 */
+  const t = (player && player.cur) ? (player.cur.time||0) : 0;
+  let posCtx = '';
+  if(t > 0){
+    const around = subtitleAround(p, t);
+    posCtx = `\n学生当前正看到本 P 的 ${fmtTime(Math.floor(t))}（本 P 总长 ${fmtDur(p.duration||0)}）`;
+    if(around) posCtx += `。此刻附近的内容：${around}`;
+  }
+  const doneN = c.parts.filter(x=>x.done).length;
+  const progCtx = `\n课程进度：已完成 ${doneN}/${c.parts.length} 个分 P。`;
+  const sys = `你是 DEEPREEL 学习助手。学生正在 B 站学习《${c.title}》的第 ${p.page} P《${p.part}》。请基于以下该分 P 的内容回答疑问、校验学生的想法并明确指出哪里想错了；简洁、直接、点到为止，不要寒暄。\n\n${ctx}${posCtx}${progCtx}${note}`;
   const history = (c.chat||[]).slice(-8);
-  return [{role:'system', content:sys}, ...history, {role:'user', content:userText}];
+  const userMsg = imgData
+    ? { role:'user', content:[ { type:'text', text:userText }, { type:'image_url', image_url:{ url: imgData } } ] }
+    : { role:'user', content:userText };
+  return [{role:'system', content:sys}, ...history, userMsg];
 }
 
 function updateAssistantContext(){
@@ -2160,8 +2229,9 @@ function updateAssistantContext(){
   const el = qs('#asst-context');
   if(!c || !c.parts[state.activePart]){ el.innerHTML = '未打开课程'; return; }
   const p = c.parts[state.activePart];
-  const ai = (state.settings.endpoint && state.settings.key) ? '<b>AI 已就绪</b>' : '<b style="color:#B23A00">未配置 AI</b>';
-  el.innerHTML = `${ai} · 课程《${escapeHtml(c.title)}》 · 当前 P${p.page} ${escapeHtml(p.part)}${p.note?' · 有笔记':''}`;
+  const ai = (state.settings.endpoint && state.settings.key) ? '<b>AI 已就绪</b>' : '<b style="color:var(--danger)">未配置 AI</b>';
+  const t = (player && player.cur && player.cur.time) ? ` · 看到 ${fmtTime(Math.floor(player.cur.time))}` : '';
+  el.innerHTML = `${ai} · 课程《${escapeHtml(c.title)}》 · 当前 P${p.page} ${escapeHtml(p.part)}${t}${p.note?' · 有笔记':''}`;
 }
 
 function renderAssistant(){
@@ -2169,7 +2239,9 @@ function renderAssistant(){
   const box = qs('#asst-messages');
   if(!c){ box.innerHTML = '<div class="asst-empty">先在课程库打开一个视频，<br/>再向我提问或记笔记。</div>'; return; }
   const msgs = c.chat || [];
-  const html = msgs.map(m => `<div class="asst-bubble ${m.role}">${escapeHtml(m.content)}</div>`).join('');
+  const msgText = m => typeof m.content === 'string' ? m.content
+    : (Array.isArray(m.content) ? m.content.map(x=> x.type==='text' ? x.text : '[图片]').join(' ') : String(m.content||''));
+  const html = msgs.map(m => `<div class="asst-bubble ${m.role}">${escapeHtml(msgText(m))}</div>`).join('');
   const liveCtx = assistantThinking && assistantStreamCtx && c.bvid === assistantStreamCtx.bvid && state.activePart === assistantStreamCtx.partIndex
     ? assistantStreamCtx
     : null;
@@ -2185,7 +2257,8 @@ async function sendAssistant(){
   const input = qs('#asst-input');
   const sendBtn = qs('#btn-asst-send');
   const text = input.value.trim();
-  if(!text) return;
+  const img = asstImgData;
+  if(!text && !img) return;
   if(assistantThinking) return;
   const c = activeCourse();
   if(!c){ toast('请先打开一个课程'); return; }
@@ -2193,19 +2266,21 @@ async function sendAssistant(){
   const partIndex = state.activePart;
   const p = c.parts[partIndex];
   c.chat = c.chat || [];
-  c.chat.push({ role:'user', content:text });
+  c.chat.push({ role:'user', content: img ? [ {type:'text', text}, {type:'image_url', image_url:{url: img}} ] : text });
   input.value = ''; input.disabled = true;
   if(sendBtn) sendBtn.disabled = true;
   assistantThinking = true;
   assistantStreamCtx = { bvid:c.bvid, partIndex, reply:'' };
   renderAssistant();
   try{
-    const messages = await buildAssistantMessages(text, c, p);
+    const messages = await buildAssistantMessages(text, c, p, img);
+    const vision = img && !/vision/i.test(state.settings.model||'') ? { model:'deepseek-v4-flash-vision-exp' } : null;
+    if(vision && qs('#asst-img-chip')) qs('#asst-img-chip').textContent = '（已用视觉模型）';
     const reply = await llmChat(messages, chunk => {
       if(!assistantStreamCtx || assistantStreamCtx.bvid !== c.bvid || assistantStreamCtx.partIndex !== partIndex) return;
       assistantStreamCtx.reply += chunk;
       renderAssistant();
-    });
+    }, vision);
     c.chat.push({ role:'assistant', content: reply || '(空回复)' });
   }catch(e){
     const msg = e.message === 'NO_KEY' ? '未配置 DeepSeek Key / 代理地址，请到设置填写。' : ('调用失败：'+(e.message||'未知错误')+'。若提示 CORS/网络，请先在 deepreel 目录执行 node proxy.js 启动代理，并把接口地址设为 http://localhost:7392/chat/completions。');
@@ -2218,6 +2293,7 @@ async function sendAssistant(){
   assistantStreamCtx = null;
   input.disabled = false;
   if(sendBtn) sendBtn.disabled = false;
+  clearAsstImg();
   saveCourses();
   renderAssistant();
   input.focus();
@@ -2240,11 +2316,14 @@ function openAssistant(){
   const drawer = qs('#assistant-drawer');
   drawer.classList.add('open'); drawer.setAttribute('aria-hidden','false');
   renderAssistant(); loadNote(); updateAssistantContext();
+  if(asstCtxTimer) clearInterval(asstCtxTimer);
+  asstCtxTimer = setInterval(()=>{ if(!drawer.classList.contains('open')) return; updateAssistantContext(); }, 2000);
   setTimeout(()=>{ const i=qs('#asst-input'); if(i) i.focus(); }, 320);
 }
 function closeAssistant(){
   const drawer = qs('#assistant-drawer');
   drawer.classList.remove('open'); drawer.setAttribute('aria-hidden','true');
+  if(asstCtxTimer){ clearInterval(asstCtxTimer); asstCtxTimer = null; }
 }
 function toggleAssistant(){
   if(qs('#assistant-drawer').classList.contains('open')) closeAssistant();
@@ -2761,13 +2840,35 @@ function bind(){
     if(e.key===' ' || e.key==='Spacebar'){ e.preventDefault(); player && player.togglePlay(); }
     if(e.key==='ArrowRight'){
       if(e.shiftKey) player && player.next();
-      else if(player) player.seekTo((player.cur.time||0) + 5);
+      else if(player){
+        player.seekTo((player.cur.time||0) + 5);
+        startFF(player, 1);   // 长按 = 2x 连续快进
+      }
     }
     if(e.key==='ArrowLeft'){
       if(e.shiftKey) player && player.prev();
-      else if(player) player.seekTo(Math.max(0, (player.cur.time||0) - 5));
+      else if(player){
+        player.seekTo(Math.max(0, (player.cur.time||0) - 5));
+        startFF(player, -1);
+      }
     }
   });
+  document.addEventListener('keyup', e=>{
+    if(e.key==='ArrowRight' || e.key==='ArrowLeft') stopFF();
+  });
+}
+
+/* 长按方向键：2 倍速连续快进/快退（每 200ms 前进 0.4s） */
+let ffTimer = null;
+function startFF(pl, dir){
+  if(ffTimer) return;
+  ffTimer = setInterval(()=>{
+    if(document.body.dataset.view!=='watch' || !player){ stopFF(); return; }
+    player.seekTo((player.cur.time||0) + 0.4*dir);
+  }, 200);
+}
+function stopFF(){
+  if(ffTimer){ clearInterval(ffTimer); ffTimer = null; }
 }
 
 /* ============ 本地代理健康检测 ============ */
@@ -2943,6 +3044,15 @@ function bindUpgrades(){
   qs('#btn-report-copy').addEventListener('click', copyLearningReport);
   qs('#report-modal').addEventListener('click', e=>{ if(e.target.id==='report-modal') qs('#report-modal').hidden = true; });
   qs('#btn-proxy-banner-close').addEventListener('click', ()=>{ qs('#proxy-banner').hidden = true; });
+  /* 截图上传（vision） */
+  qs('#btn-asst-img').addEventListener('click', ()=>qs('#asst-img-file').click());
+  qs('#asst-img-file').addEventListener('change', e=>{
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if(!f) return;
+    fileToDataURL(f).then(setAsstImg).catch(err=>toast('截图读取失败：'+(err.message||'')));
+  });
+  qs('#btn-asst-img-clear').addEventListener('click', clearAsstImg);
 }
 
 /* ============ 启动 ============ */

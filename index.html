@@ -174,6 +174,7 @@
               <option value="1.25">1.25x</option>
               <option value="1.5">1.5x</option>
               <option value="2">2x</option>
+              <option value="3">3x</option>
             </select>
             <select class="pc-select" id="sel-quality" title="清晰度">
               <option value="80">1080P</option>
@@ -396,10 +397,17 @@
     <div class="asst-pane" id="asst-chat">
       <div class="asst-context" id="asst-context">—</div>
       <div class="asst-messages" id="asst-messages"></div>
+      <div class="asst-img-chip" id="asst-img-chip" hidden>
+        <span class="asst-img-thumb"></span>
+        <span class="asst-img-name"></span>
+        <button class="asst-img-clear" id="btn-asst-img-clear" aria-label="移除截图">×</button>
+      </div>
       <div class="asst-input-row">
+        <button class="asst-upload" id="btn-asst-img" title="上传截图给 AI 看（自动切换视觉模型）">📷</button>
         <textarea id="asst-input" rows="2" placeholder="随时提问，或写下你的想法让 AI 校验对错… (Enter 发送 / Shift+Enter 换行)"></textarea>
         <button class="solid-btn" id="btn-asst-send">发送</button>
       </div>
+      <input type="file" id="asst-img-file" accept="image/*" hidden>
     </div>
     <!-- 笔记 -->
     <div class="asst-pane" id="asst-notes" hidden>
