@@ -17,3 +17,9 @@ Thumbs.db
 
 # 本地日志
 *.log
+
+# 本地 HTTPS 证书（含私钥，勿提交）
+certs/
+*.pem
+*.cer
+*.pfx

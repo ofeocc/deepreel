@@ -42,7 +42,8 @@ function stripCors(headers) {
   return h;
 }
 
-http.createServer((req, res) => {
+/* 统一请求处理器：http(7392) 与 https(7443) 共用 */
+const handler = (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, CORS);
     return res.end();
@@ -75,7 +76,10 @@ http.createServer((req, res) => {
   } else {
     serveStatic(req, res, path);
   }
-}).on('error', (err) => {
+};
+
+/* ---------- HTTP 服务（本机 7392） ---------- */
+http.createServer(handler).on('error', (err) => {
   /* 端口已被占用：代理多半已在运行，直接打开应用即可，不必报错 */
   if (err && err.code === 'EADDRINUSE') {
     console.log(`\n  端口 ${PORT} 已被占用 —— 代理似乎已经在运行。`);
@@ -94,6 +98,31 @@ http.createServer((req, res) => {
   console.log(`  按 Ctrl+C 停止\n`);
   if (!process.env.DEEPREEL_NO_OPEN) openBrowser(url);
 });
+
+/* ---------- HTTPS 服务（局域网/手机 7443，需 certs/ 证书） ---------- */
+const HTTPS_PORT = process.env.DEEPREEL_HTTPS_PORT || 7443;
+const certDir = path.join(__dirname, 'certs');
+if (fs.existsSync(path.join(certDir, 'cert.pem')) && fs.existsSync(path.join(certDir, 'key.pem'))) {
+  try {
+    const tlsOpts = {
+      key: fs.readFileSync(path.join(certDir, 'key.pem')),
+      cert: fs.readFileSync(path.join(certDir, 'cert.pem')),
+    };
+    https.createServer(tlsOpts, handler).on('error', (err) => {
+      if (err && err.code === 'EADDRINUSE') {
+        console.log(`  端口 ${HTTPS_PORT} 已被占用 —— HTTPS 服务已在运行。`);
+        return;
+      }
+      throw err;
+    }).listen(HTTPS_PORT, () => {
+      console.log(`  HTTPS    → https://localhost:${HTTPS_PORT}/（手机/平板用 https://<电脑局域网IP>:${HTTPS_PORT}/，需先安装 certs/deepreel-cert.cer 并信任）`);
+    });
+  } catch (e) {
+    console.log('  HTTPS 启动失败：' + String(e && e.message || e));
+  }
+} else {
+  console.log('  HTTPS    → 未启用（缺少 certs/cert.pem 与 key.pem，可运行 certs 生成脚本后重启）');
+}
 
 /* ============ WebDAV 云同步转发 ============ */
 /* 浏览器直连坚果云 WebDAV 会被 CORS 拦，经本地代理转发。
