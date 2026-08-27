@@ -1394,11 +1394,12 @@ class PlayerBridge{
     try{
       let data = await this.fetchPlayurl(c.bvid, p.cid, 16);
       this.fillQualityOptions(data);
-      if(data.dash && window.MediaSource){
+      const mseOk = !!(window.MediaSource && window.MediaSource.isTypeSupported && data.dash && data.dash.video && data.dash.video.length);
+      if(mseOk){
         try{
           await this.setupDash(data, resumeAt);
         }catch(e){
-          // 浏览器不支持该编码 → 退回 MP4
+          // MSE/编码不支持 → 退回 MP4（fnval=1）
           this.teardown();
           data = await this.fetchPlayurl(c.bvid, p.cid, 1);
           this.fillQualityOptions(data);
@@ -1407,7 +1408,11 @@ class PlayerBridge{
       }else if(data.durl){
         await this.setupMp4(data, resumeAt);
       }else{
-        throw new Error('无可用视频流');
+        // 无 MSE 或无 DASH 视频流 → 直接请求 MP4
+        data = await this.fetchPlayurl(c.bvid, p.cid, 1);
+        this.fillQualityOptions(data);
+        if(data.durl) await this.setupMp4(data, resumeAt);
+        else throw new Error('无可用视频流');
       }
     }catch(e){
       this.showLoading(false);
@@ -1427,11 +1432,15 @@ class PlayerBridge{
     if(!this.playurlCache) this.playurlCache = new Map();
     const key = `${bvid}|${cid}|${this.quality()}|${fnval}`;
     if(this.playurlCache.has(key)) return this.playurlCache.get(key);
-    const r = await fetch(`${this.proxyBase()}/bili/playurl?bvid=${bvid}&cid=${cid}&qn=${this.quality()}&fnval=${fnval}&fnver=0&fourk=1`, { headers: { 'X-Bili-Cookie': this.cookie() } });
-    const j = await r.json();
-    if(j.code !== 0 || !j.data) throw new Error(j.message || '接口错误');
-    this.playurlCache.set(key, j.data);
-    return j.data;
+    const ctl = new AbortController();
+    const timer = setTimeout(()=>ctl.abort(), 12000);   // 拉流地址 12s 超时，避免无限转圈
+    try{
+      const r = await fetch(`${this.proxyBase()}/bili/playurl?bvid=${bvid}&cid=${cid}&qn=${this.quality()}&fnval=${fnval}&fnver=0&fourk=1`, { headers: { 'X-Bili-Cookie': this.cookie() }, signal: ctl.signal });
+      const j = await r.json();
+      if(j.code !== 0 || !j.data) throw new Error(j.message || '接口错误');
+      this.playurlCache.set(key, j.data);
+      return j.data;
+    } finally { clearTimeout(timer); }
   }
 
   /* ---------- DASH（MSE）---------- */

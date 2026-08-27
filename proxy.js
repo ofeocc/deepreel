@@ -242,6 +242,11 @@ function handleDeepSeek(req, res) {
   });
 }
 
+/* ============ 调试日志（写入 deepreel-proxy.log，排查手机播放问题用） ============ */
+function logLine(msg) {
+  try { fs.appendFileSync(path.join(__dirname, 'deepreel-proxy.log'), new Date().toISOString() + ' ' + msg + '\n'); } catch {}
+}
+
 /* ============ B站 playurl 代理 ============ */
 function handleBiliPlayurl(req, res, parsed) {
   const bvid = parsed.searchParams.get('bvid');
@@ -249,6 +254,7 @@ function handleBiliPlayurl(req, res, parsed) {
   const qn = parsed.searchParams.get('qn') || '80';
   const fnval = parsed.searchParams.get('fnval') || '1';
   const cookie = req.headers['x-bili-cookie'] || '';
+  logLine(`[playurl] req bvid=${bvid} cid=${cid} qn=${qn} fnval=${fnval} cookie=${cookie ? 'yes' : 'no'}`);
 
   if (!bvid || !cid) {
     res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
@@ -411,6 +417,7 @@ function handleBiliQrPoll(req, res, parsed) {
 /* ============ B站视频流转发 ============ */
 function handleBiliStream(req, res, parsed) {
   const streamUrl = parsed.searchParams.get('url');
+  logLine(`[stream] req range=${req.headers['range'] || '-'} url=${(streamUrl||'').slice(0,60)}`);
   if (!streamUrl) {
     res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
     return res.end(JSON.stringify({ error: 'missing url param' }));
