@@ -57,7 +57,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.1.0'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.1.1'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -260,7 +260,10 @@ function reveal(sel, opts={}){
 function proxyBase(){
   const ep = state.settings.endpoint || '';
   const m = ep.match(/^(https?:\/\/[^/]+)/);
-  return m ? m[1] : 'http://localhost:7392';
+  if(m) return m[1];
+  /* 页面由本地代理托管（http/https 打开）时，API 与页面同源——手机/平板经局域网 IP 访问也能正常用 */
+  if(location.protocol === 'http:' || location.protocol === 'https:') return location.origin;
+  return 'http://localhost:7392';
 }
 /* 带超时的 fetch：任何请求都不会无限挂起 */
 function fetchTimeout(url, opts={}, ms=8000){
