@@ -208,7 +208,25 @@
           <span class="focus-dot"></span> 专注模式 · 无推荐、无干扰
         </div>
         <div class="player-loading" id="player-loading" hidden>
-          <span class="sk-loader"></span> 正在加载视频…
+          <div class="tv-loading">
+            <svg class="tv-svg" viewBox="0 0 120 100" width="106" height="88" fill="none" aria-hidden="true">
+              <g class="tv-body" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="60" y1="16" x2="60" y2="3"/>
+                <line x1="43" y1="18" x2="28" y2="6"/>
+                <line x1="77" y1="18" x2="92" y2="6"/>
+                <rect x="16" y="16" width="88" height="62" rx="8"/>
+                <rect x="25" y="25" width="70" height="44" rx="4" stroke-width="2.4"/>
+                <rect x="30" y="78" width="9" height="6" rx="2" stroke-width="2.4"/>
+                <rect x="81" y="78" width="9" height="6" rx="2" stroke-width="2.4"/>
+              </g>
+              <g class="tv-face" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                <path class="face-open" d="M40 44 L45 39.2 L50 44"/>
+                <path class="face-open" d="M70 44 L75 39.2 L80 44"/>
+                <path class="face-mouth" d="M52 44.5 Q55 48.6 58 44.5 Q61 48.6 64 44.5"/>
+              </g>
+            </svg>
+            <div class="tv-tag">哔哩哔哩 (゜-゜)つロ 干杯~</div>
+          </div>
         </div>
         <!-- 双击快进/快退提示 -->
         <div class="seek-feedback" id="seek-feedback" hidden>+10s</div>

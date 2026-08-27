@@ -66,7 +66,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.3.1'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.3.5'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -1292,6 +1292,7 @@ class PlayerBridge{
     this._retried = false;
     this._errToasted = false;
     this._ctlTimer = null;
+    this._tipTimer = null;
     this.stallTimer = null;
     this._lastT = -1;
     this._stallCount = 0;
@@ -1364,6 +1365,15 @@ class PlayerBridge{
     this.wrap.addEventListener('pointerdown', e=>{ if(e.pointerType==='touch') this.flashControls(); });
   }
   showLoading(on){ if(this.loading) this.loading.hidden = !on; }
+  /* 专注模式入场仪式：滑入提示，数秒后自动淡出（不常驻遮挡画面；切 P 时重播） */
+  showFocusTip(){
+    const tip = this.tip; if(!tip) return;
+    tip.classList.remove('tip-gone');
+    tip.classList.add('tip-live');
+    void tip.offsetWidth;                 // 强制回流，重播入场动画
+    clearTimeout(this._tipTimer);
+    this._tipTimer = setTimeout(()=>{ tip.classList.add('tip-gone'); }, 3600);
+  }
   flashControls(){
     this.wrap.classList.add('show-controls');
     clearTimeout(this._ctlTimer);
@@ -1399,6 +1409,7 @@ class PlayerBridge{
     this._pendingSeek = null;
     this.segs = []; this.segStart = []; this.segIdx = 0; this.segBase = 0;
     this.showLoading(false);
+    if(this.tip) this.tip.classList.add('tip-gone');   // 加载失败/退出时不残留常驻标签
   }
 
   /* ---------- 加载入口 ---------- */
@@ -1455,6 +1466,7 @@ class PlayerBridge{
     const np = c.parts[idx+1];
     if(np && np.cid) this.fetchPlayurl(c.bvid, np.cid, 16).catch(()=>{});
     this.startPolling();
+    this.showFocusTip();
   }
 
   async fetchPlayurl(bvid, cid, fnval){
@@ -1865,9 +1877,11 @@ class PlayerBridge{
   /* ---------- 进度/状态 ---------- */
   onTimeUpdate(){
     if(this.mode === 'dash' && !this.video.seeking) this.schedule();
-    if(!this.running) return;
+    // 进度条/时间必须跟随视频本体，不能受学习统计开关(running)影响：
+    // running=false 时视频仍可能正常播放（卸载中/异常路径），此时进度条照常走，仅跳过持久化。
+    if(!this.cur || !this.cur.course) return;
     const t = this.video.currentTime + (this.mode === 'mp4' ? this.segBase : 0);
-    this.setTime(t);
+    this.setTime(t, false, this.running);
   }
   onEnded(){
     if(!this.running) return;
@@ -1908,7 +1922,7 @@ class PlayerBridge{
     if(this.cur.time >= this.cur.duration){ this.markDone(); return; }
     this.timer = setTimeout(()=>this.simStep(), 1000);
   }
-  setTime(t, isSim){
+  setTime(t, isSim, doPersist){
     const p = this.cur.course && this.cur.course.parts[this.cur.partIdx]; if(!p) return;
     const before = p.progress||0;
     const ratio = this.cur.duration>0 ? t/this.cur.duration : 0;
@@ -1921,7 +1935,7 @@ class PlayerBridge{
       if(delta>0) recordActivity(delta, 0, this.cur.course.bvid);
     }
     this.updateBar();
-    persist();
+    if(doPersist !== false) persist();
     if(ratio>=0.999 && !p.done){ this.markDone(); }
   }
   markDone(){
@@ -3361,6 +3375,15 @@ function boot(){
   player = new PlayerBridge();
   bind();
   bindUpgrades();
+  /* 进度条兜底看门狗：个别移动浏览器/全屏/画中画下 timeupdate 可能不触发，
+     每秒按视频真实播放头强制同步一次进度条与时间（不依赖 running / timeupdate）。 */
+  setInterval(()=>{
+    if(!player || !player.cur || !player.cur.course || player.cur.simulate) return;
+    const v = player.video;
+    if(!v || v.paused || v.ended) return;
+    const t = v.currentTime + (player.mode === 'mp4' ? (player.segBase||0) : 0);
+    if(Math.abs(t - (player.cur.time||0)) > 0.25) player.setTime(t, false, player.running);
+  }, 1000);
   // 主题化下拉
   initCSelect(qs('#bili-quality'));
   initCSelect(qs('#llm-model'));
