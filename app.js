@@ -2359,6 +2359,8 @@ function toggleAsstFocus(force){
   else { const w = state.settings.drawerWidth; d.style.width = w || ''; }
   const btn = qs('#btn-asst-focus');
   if(btn) btn.classList.toggle('is-on', on);
+  const label = qs('#btn-asst-focus-label');
+  if(label) label.textContent = on ? '复原' : '全屏';
 }
 /* 抽屉左边缘拖拽调宽（380-760px），宽度存入设置 */
 function initDrawerResize(){

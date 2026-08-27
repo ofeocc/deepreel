@@ -997,14 +997,9 @@ body{
 .asst-resize:hover::after, .asst-resize:active::after{ opacity:1; }
 
 /* 全屏对话按钮 */
-.asst-head-actions{ display:flex; align-items:center; gap:6px; }
-.asst-focus-btn{
-  background:none; border:1px solid var(--line); color:var(--ink-mute); border-radius:8px;
-  width:30px; height:30px; display:flex; align-items:center; justify-content:center;
-  cursor:pointer; transition:.2s var(--ease);
-}
-.asst-focus-btn:hover{ color:var(--ink); border-color:var(--ink); }
-.asst-focus-btn.is-on{ color:var(--accent-ink); background:var(--accent-deep); border-color:var(--accent-deep); }
+.asst-head-actions{ display:flex; align-items:center; gap:8px; }
+.asst-focus-btn{ flex-shrink:0; }
+.asst-focus-btn.is-on{ background:var(--accent); border-color:var(--accent-deep); color:var(--accent-ink); font-weight:700; }
 
 /* 快捷提问 chips */
 .asst-quick{ display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
