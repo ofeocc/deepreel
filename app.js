@@ -57,6 +57,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
+const APP_VERSION = '1.0.4'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -1298,6 +1299,11 @@ class PlayerBridge{
 
     const v = this.video;
     v.addEventListener('timeupdate', ()=> this.onTimeUpdate());
+    /* 暂停状态下 seek 不触发 timeupdate，需用 seeked 同步进度条 */
+    v.addEventListener('seeked', ()=>{
+      const t = this.video.currentTime + (this.mode==='mp4' ? this.segBase : 0);
+      this.setTime(t);
+    });
     v.addEventListener('ended', ()=> this.onEnded());
     v.addEventListener('play', ()=> { const b=qs('#btn-play'); if(b) b.textContent='暂停'; this._started=true; this._pauseAt=null; });
     v.addEventListener('pause', ()=> { const b=qs('#btn-play'); if(b) b.textContent='播放'; if(this._started && this._pauseAt==null) this._pauseAt = Date.now(); });
@@ -2208,11 +2214,14 @@ async function buildAssistantMessages(userText, c = activeCourse(), p = c && c.p
   const note = p.note ? `\n学生本 P 笔记：${p.note}` : '';
   /* 位置感知：当前播放时间 + 该时刻附近字幕 + 课程进度 */
   const t = (player && player.cur) ? (player.cur.time||0) : 0;
-  let posCtx = '';
-  if(t > 0){
-    const around = subtitleAround(p, t);
-    posCtx = `\n学生当前正看到本 P 的 ${fmtTime(Math.floor(t))}（本 P 总长 ${fmtDur(p.duration||0)}）`;
+  const ref = t > 0 ? t : (p.lastTime||0);
+  let posCtx;
+  if(ref > 0){
+    const around = subtitleAround(p, ref);
+    posCtx = `\n学生当前位于本 P 的 ${fmtTime(Math.floor(ref))}（本 P 总长 ${fmtDur(p.duration||0)}）${t>0?'':'（当前暂停/未播放，位置为上次停留处）'}`;
     if(around) posCtx += `。此刻附近的内容：${around}`;
+  }else{
+    posCtx = `\n学生尚未开始播放本 P（本 P 总长 ${fmtDur(p.duration||0)}）。`;
   }
   const doneN = c.parts.filter(x=>x.done).length;
   const progCtx = `\n课程进度：已完成 ${doneN}/${c.parts.length} 个分 P。`;
@@ -3058,6 +3067,7 @@ function bindUpgrades(){
 /* ============ 启动 ============ */
 function boot(){
   loadState();
+  console.log(`DEEPREEL ${APP_VERSION} 已启动`);
   applyTheme(state.settings.theme || 'light', false);
   player = new PlayerBridge();
   bind();
