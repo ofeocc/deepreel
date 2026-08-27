@@ -57,7 +57,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.2.0'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.2.1'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -258,11 +258,12 @@ function reveal(sel, opts={}){
 
 /* ============ B 站接口（多代理兜底） ============ */
 function proxyBase(){
+  /* 页面由本地代理托管（http/https 打开，含手机/平板经局域网 IP）→ 一律同源。
+     即使旧设置里存了 localhost endpoint 也忽略，否则手机上的 localhost 会指向手机自己 */
+  if(location.protocol === 'http:' || location.protocol === 'https:') return location.origin;
   const ep = state.settings.endpoint || '';
   const m = ep.match(/^(https?:\/\/[^/]+)/);
   if(m) return m[1];
-  /* 页面由本地代理托管（http/https 打开）时，API 与页面同源——手机/平板经局域网 IP 访问也能正常用 */
-  if(location.protocol === 'http:' || location.protocol === 'https:') return location.origin;
   return 'http://localhost:7392';
 }
 /* 带超时的 fetch：任何请求都不会无限挂起 */
