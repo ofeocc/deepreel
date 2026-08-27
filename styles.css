@@ -986,6 +986,45 @@ body{
 }
 .asst-img-clear:hover{ color:var(--danger); }
 
+/* 抽屉可调宽 */
+.asst-resize{
+  position:absolute; left:-3px; top:0; bottom:0; width:7px; cursor:ew-resize; z-index:6;
+}
+.asst-resize::after{
+  content:""; position:absolute; left:2px; top:14px; bottom:14px; width:2px;
+  background:var(--line); border-radius:2px; opacity:0; transition:opacity .2s;
+}
+.asst-resize:hover::after, .asst-resize:active::after{ opacity:1; }
+
+/* 全屏对话按钮 */
+.asst-head-actions{ display:flex; align-items:center; gap:6px; }
+.asst-focus-btn{
+  background:none; border:1px solid var(--line); color:var(--ink-mute); border-radius:8px;
+  width:30px; height:30px; display:flex; align-items:center; justify-content:center;
+  cursor:pointer; transition:.2s var(--ease);
+}
+.asst-focus-btn:hover{ color:var(--ink); border-color:var(--ink); }
+.asst-focus-btn.is-on{ color:var(--accent-ink); background:var(--accent-deep); border-color:var(--accent-deep); }
+
+/* 快捷提问 chips */
+.asst-quick{ display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
+.asst-quick[hidden]{ display:none; }
+.asst-q{
+  font-family:var(--font-mono); font-size:11px; color:var(--ink-soft);
+  background:var(--bg); border:1px solid var(--line); border-radius:999px; padding:5px 11px; cursor:pointer;
+  transition:.2s var(--ease);
+}
+.asst-q:hover{ color:var(--accent-ink); background:var(--accent); border-color:var(--accent-deep); }
+
+/* 全屏对话模式：视频缩到左侧小窗继续播放 */
+body.asst-focus .side-panel{ display:none; }
+body.asst-focus .watch-main{ grid-template-columns:minmax(0,460px) 1fr; max-width:none; }
+body.asst-focus .asst-drawer{ width:calc(100vw - 480px); }
+@media(max-width:1100px){
+  body.asst-focus .asst-drawer{ width:100vw; }
+  body.asst-focus .watch-main{ display:none; }   /* 窄屏：聊天全屏，视频继续后台播放 */
+}
+
 .asst-note-hint{ font-family:var(--font-body); font-size:13px; color:var(--ink-soft); line-height:1.75; margin:0 0 14px; }
 .asst-note-hint strong{ color:var(--ink); }
 .asst-note-area{

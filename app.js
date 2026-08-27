@@ -57,7 +57,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.0.6'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.0.7'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -2245,6 +2245,8 @@ function renderAssistant(){
   const box = qs('#asst-messages');
   if(!c){ box.innerHTML = '<div class="asst-empty">先在课程库打开一个视频，<br/>再向我提问或记笔记。</div>'; return; }
   const msgs = c.chat || [];
+  const qk = qs('#asst-quick');
+  if(qk) qk.hidden = !!(msgs && msgs.length);   // 有对话后收起快捷提问
   const msgHtml = m => {
     if(typeof m.content === 'string') return escapeHtml(m.content);
     if(Array.isArray(m.content)){
@@ -2331,6 +2333,11 @@ function saveNote(){
 }
 function openAssistant(){
   const drawer = qs('#assistant-drawer');
+  /* 应用保存的抽屉宽度（全屏模式由 CSS 控制） */
+  if(!document.body.classList.contains('asst-focus')){
+    const w = state.settings.drawerWidth;
+    if(w) drawer.style.width = w;
+  }
   drawer.classList.add('open'); drawer.setAttribute('aria-hidden','false');
   renderAssistant(); loadNote(); updateAssistantContext();
   if(asstCtxTimer) clearInterval(asstCtxTimer);
@@ -2340,7 +2347,41 @@ function openAssistant(){
 function closeAssistant(){
   const drawer = qs('#assistant-drawer');
   drawer.classList.remove('open'); drawer.setAttribute('aria-hidden','true');
+  if(document.body.classList.contains('asst-focus')) toggleAsstFocus(false);
   if(asstCtxTimer){ clearInterval(asstCtxTimer); asstCtxTimer = null; }
+}
+/* 全屏对话模式：视频缩到左侧小窗继续播放 */
+function toggleAsstFocus(force){
+  const d = qs('#assistant-drawer');
+  const on = typeof force === 'boolean' ? force : !document.body.classList.contains('asst-focus');
+  document.body.classList.toggle('asst-focus', on);
+  if(on) d.style.width = '';
+  else { const w = state.settings.drawerWidth; d.style.width = w || ''; }
+  const btn = qs('#btn-asst-focus');
+  if(btn) btn.classList.toggle('is-on', on);
+}
+/* 抽屉左边缘拖拽调宽（380-760px），宽度存入设置 */
+function initDrawerResize(){
+  const handle = qs('#asst-resize');
+  const drawer = qs('#assistant-drawer');
+  if(!handle || !drawer) return;
+  handle.addEventListener('pointerdown', e=>{
+    e.preventDefault();
+    if(document.body.classList.contains('asst-focus')) return;
+    const startX = e.clientX, startW = drawer.offsetWidth;
+    const move = ev=>{
+      const w = Math.max(380, Math.min(760, startW - (ev.clientX - startX)));
+      drawer.style.width = w + 'px';
+    };
+    const up = ()=>{
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      state.settings.drawerWidth = drawer.style.width;
+      saveSettings();
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  });
 }
 function toggleAssistant(){
   if(qs('#assistant-drawer').classList.contains('open')) closeAssistant();
@@ -2849,8 +2890,14 @@ function bind(){
       if(document.fullscreenElement) return;   // 原生全屏的退出交给浏览器
       const wrap = qs('.player-frame-wrap');
       if(wrap && wrap.classList.contains('is-fscreen')){ toggleFakeFullscreen(); return; }
+      if(document.body.classList.contains('asst-focus')){ toggleAsstFocus(false); return; }
       if(v==='settings') backFromSettings();
       else if(v==='watch') backToLibrary();
+      return;
+    }
+    /* A 键：随时呼出/收起 AI 助手 */
+    if((e.key==='a' || e.key==='A') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey){
+      if(state.courses.length) toggleAssistant();
       return;
     }
     if(v!=='watch') return;
@@ -3070,6 +3117,15 @@ function bindUpgrades(){
     fileToDataURL(f).then(setAsstImg).catch(err=>toast('截图读取失败：'+(err.message||'')));
   });
   qs('#btn-asst-img-clear').addEventListener('click', clearAsstImg);
+  /* 全屏对话 + 快捷提问 + 抽屉调宽 */
+  qs('#btn-asst-focus').addEventListener('click', ()=>toggleAsstFocus());
+  qs('#asst-quick').addEventListener('click', e=>{
+    const btn = e.target.closest('.asst-q');
+    if(!btn || assistantThinking) return;
+    const input = qs('#asst-input');
+    if(input){ input.value = btn.dataset.q || ''; sendAssistant(); }
+  });
+  initDrawerResize();
 }
 
 /* ============ 启动 ============ */

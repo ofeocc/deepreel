@@ -336,7 +336,7 @@
       </div>
     </section>
 
-    <p class="settings-note" style="text-align:center; margin-top:26px; color:var(--ink-mute)">DEEPREEL v1.0.6 · 数据仅存于本地浏览器，可随时导出备份</p>
+    <p class="settings-note" style="text-align:center; margin-top:26px; color:var(--ink-mute)">DEEPREEL v1.0.7 · 数据仅存于本地浏览器，可随时导出备份</p>
 
   </div>
 </main>
@@ -386,18 +386,30 @@
 </button>
 
 <aside class="asst-drawer" id="assistant-drawer" aria-hidden="true" data-lenis-prevent-wheel>
+  <div class="asst-resize" id="asst-resize" title="拖拽调整宽度"></div>
   <div class="asst-head">
     <div class="asst-tabs">
       <button class="asst-tab is-active" data-tab="chat" id="asst-tab-chat">助手</button>
       <button class="asst-tab" data-tab="notes" id="asst-tab-notes">笔记</button>
     </div>
-    <button class="asst-x" id="btn-asst-close" aria-label="关闭">×</button>
+    <div class="asst-head-actions">
+      <button class="asst-focus-btn" id="btn-asst-focus" title="全屏对话模式（视频缩小到左侧继续播放）" aria-label="全屏对话">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+      </button>
+      <button class="asst-x" id="btn-asst-close" aria-label="关闭">×</button>
+    </div>
   </div>
 
   <div class="asst-body">
     <!-- 助手对话 -->
     <div class="asst-pane" id="asst-chat">
       <div class="asst-context" id="asst-context">—</div>
+      <div class="asst-quick" id="asst-quick">
+        <button class="asst-q" data-q="这 P 讲了什么重点？">这P讲了什么</button>
+        <button class="asst-q" data-q="考考我，出 3 道题检验我对这 P 的掌握">考考我</button>
+        <button class="asst-q" data-q="帮我校验一下我对这 P 的理解对不对">校验理解</button>
+        <button class="asst-q" data-q="用一句话总结这 P 的核心">一句话总结</button>
+      </div>
       <div class="asst-messages" id="asst-messages"></div>
       <div class="asst-img-chip" id="asst-img-chip" hidden>
         <span class="asst-img-thumb"></span>
