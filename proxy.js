@@ -19,6 +19,7 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const dns = require('dns');
 const { exec } = require('child_process');
 
 const PORT = process.env.DEEPREEL_PORT || 7392;
@@ -97,6 +98,13 @@ http.createServer(handler).on('error', (err) => {
   console.log(`  B站 流    → /bili/stream?url=xxx`);
   console.log(`  按 Ctrl+C 停止\n`);
   if (!process.env.DEEPREEL_NO_OPEN) openBrowser(url);
+  /* 预热：解析并轻连一次 api.bilibili.com，避免首个播放请求因 DNS/连接冷启动超时 */
+  try { dns.lookup('api.bilibili.com', () => {}); } catch {}
+  try {
+    const warm = https.request({ host: 'api.bilibili.com', path: '/x/web-interface/nav', method: 'HEAD' }, () => {});
+    warm.on('error', () => {});
+    warm.end();
+  } catch {}
 });
 
 /* ---------- HTTPS 服务（局域网/手机 7443，需 certs/ 证书） ---------- */

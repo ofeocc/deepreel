@@ -1392,7 +1392,9 @@ class PlayerBridge{
     this._errToasted = false;
     const resumeAt = Math.max(0, p.lastTime||0);
     try{
-      let data = await this.fetchPlayurl(c.bvid, p.cid, 16);
+      let data = null;
+      try { data = await this.fetchPlayurl(c.bvid, p.cid, 16); }
+      catch(e){ /* 冷启动首次可能超时/抖动，重试一次（第二次通常很快） */ data = await this.fetchPlayurl(c.bvid, p.cid, 16); }
       this.fillQualityOptions(data);
       const mseOk = !!(window.MediaSource && window.MediaSource.isTypeSupported && data.dash && data.dash.video && data.dash.video.length);
       if(mseOk){
@@ -1433,7 +1435,7 @@ class PlayerBridge{
     const key = `${bvid}|${cid}|${this.quality()}|${fnval}`;
     if(this.playurlCache.has(key)) return this.playurlCache.get(key);
     const ctl = new AbortController();
-    const timer = setTimeout(()=>ctl.abort(), 12000);   // 拉流地址 12s 超时，避免无限转圈
+    const timer = setTimeout(()=>ctl.abort(), 15000);   // 拉流地址 15s 超时（冷启动可能较慢）
     try{
       const r = await fetch(`${this.proxyBase()}/bili/playurl?bvid=${bvid}&cid=${cid}&qn=${this.quality()}&fnval=${fnval}&fnver=0&fourk=1`, { headers: { 'X-Bili-Cookie': this.cookie() }, signal: ctl.signal });
       const j = await r.json();
