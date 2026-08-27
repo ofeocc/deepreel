@@ -66,7 +66,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.3.6'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.3.7'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -1274,6 +1274,9 @@ class PlayerBridge{
     this.wrap = qs('#player-frame-wrap');
     this.tip = qs('#player-focus-tip');
     this.loading = qs('#player-loading');
+    this._logEl = qs('#tv-log');
+    this._logQueue = [];
+    this._logTyping = false;
     this.running = false;
     this.timer = null;
     this.trimTimer = null;
@@ -1364,7 +1367,41 @@ class PlayerBridge{
     });
     this.wrap.addEventListener('pointerdown', e=>{ if(e.pointerType==='touch') this.flashControls(); });
   }
-  showLoading(on){ if(this.loading) this.loading.hidden = !on; }
+  showLoading(on){
+    if(this.loading) this.loading.hidden = !on;
+    if(on){
+      this._logQueue = [];
+      this._logTyping = false;
+      if(this._logEl) this._logEl.innerHTML = '';
+    }
+  }
+  /* 加载终端日志：逐行逐字流式输出（打字机），行与行间留停顿，终端感 */
+  logLine(text){
+    if(!this._logEl) return;
+    this._logQueue.push(text);
+    this._pumpLog();
+  }
+  _pumpLog(){
+    if(this._logTyping) return;
+    const next = this._logQueue.shift();
+    if(next == null) return;
+    this._logTyping = true;
+    const row = document.createElement('div');
+    row.className = 'tv-log-row';
+    row.textContent = '';
+    this._logEl.appendChild(row);
+    let i = 0;
+    const timer = setInterval(()=>{
+      i++;
+      row.textContent = next.slice(0, i);
+      if(i >= next.length){
+        clearInterval(timer);
+        row.textContent = next;
+        this._logTyping = false;
+        setTimeout(()=> this._pumpLog(), 240);   // 行间停顿
+      }
+    }, 26);
+  }
   /* 专注模式入场仪式：滑入提示，数秒后自动淡出（不常驻遮挡画面；切 P 时重播） */
   showFocusTip(){
     const tip = this.tip; if(!tip) return;
@@ -1424,17 +1461,21 @@ class PlayerBridge{
     this.updateBar();
     if(c.isSample){ this.startPolling(); return; }
     this.showLoading(true);
+    this.logLine('正在初始化播放器…');
     this._retried = false;
     this._errToasted = false;
     const resumeAt = Math.max(0, p.lastTime||0);
     try{
       let data = null;
+      this.logLine('正在获取视频地址…');
       try { data = await this.fetchPlayurl(c.bvid, p.cid, 16); }
       catch(e){ /* 冷启动首次可能超时/抖动，重试一次（第二次通常很快） */ data = await this.fetchPlayurl(c.bvid, p.cid, 16); }
       this.fillQualityOptions(data);
+      this.logLine('正在解析视频流…');
       const mseOk = !!(window.MediaSource && window.MediaSource.isTypeSupported && data.dash && data.dash.video && data.dash.video.length);
       if(mseOk){
         try{
+          this.logLine('正在装配音视频流…');
           await this.setupDash(data, resumeAt);
         }catch(e){
           // MSE/编码不支持 → 退回 MP4（fnval=1）
@@ -1442,17 +1483,20 @@ class PlayerBridge{
           this.teardown();
           data = await this.fetchPlayurl(c.bvid, p.cid, 1);
           this.fillQualityOptions(data);
+          this.logLine('编码不支持，回退 MP4…');
           await this.setupMp4(data, resumeAt);
         }
       }else if(data.durl){
+        this.logLine('正在装配音视频流…');
         await this.setupMp4(data, resumeAt);
       }else{
         // 无 MSE 或无 DASH 视频流 → 直接请求 MP4
         data = await this.fetchPlayurl(c.bvid, p.cid, 1);
         this.fillQualityOptions(data);
-        if(data.durl) await this.setupMp4(data, resumeAt);
+        if(data.durl){ this.logLine('正在装配音视频流…'); await this.setupMp4(data, resumeAt); }
         else throw new Error('无可用视频流');
       }
+      this.logLine('等待数据回传…');
     }catch(e){
       this.showLoading(false);
       reportDebug('load-error: ' + (e.message||e));
