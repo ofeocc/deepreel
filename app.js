@@ -57,7 +57,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.0.7'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.1.0'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -1312,8 +1312,36 @@ class PlayerBridge{
       if(this.mode && this.cur.course && !this.cur.simulate) this.onStreamError(new Error('video element error'));
       else this.showLoading(false);
     });
-    // 点击视频切换播放；触屏轻点唤出控制条
-    v.addEventListener('click', ()=>{ if(this.mode && !this.cur.simulate) this.togglePlay(); });
+    // 触屏：单击播放/暂停，双击快进(+10s)/快退(-10s)；鼠标：单击切播放、双击忽略
+    this._touchMode = ('ontouchstart' in window) || (window.matchMedia && window.matchMedia('(hover:none)').matches);
+    this._tapT = null; this._lastTap = 0; this._skipClick = false;
+    v.addEventListener('pointerup', e=>{
+      if(e.pointerType !== 'touch') return;
+      if(e.target.closest('.player-controls')) return;
+      const now = Date.now();
+      if(now - this._lastTap < 300){
+        clearTimeout(this._tapT); this._tapT = null; this._lastTap = 0;
+        const r = this.wrap.getBoundingClientRect();
+        const x = e.clientX - r.left;
+        this.seekTo((this.cur.time||0) + (x < r.width/2 ? -10 : 10));
+        this._skipClick = true;
+        this.flashControls();
+        return;
+      }
+      this._lastTap = now;
+      clearTimeout(this._tapT);
+      this._tapT = setTimeout(()=>{
+        this._tapT = null; this._lastTap = 0;
+        if(this.mode && !this.cur.simulate) this.togglePlay();
+        this.flashControls();
+      }, 280);
+    });
+    v.addEventListener('click', e=>{
+      if(this._skipClick){ this._skipClick = false; return; }
+      if(e.detail > 1) return;
+      if(this._touchMode) return;   // 触屏单击已由 pointerup 定时处理
+      if(this.mode && !this.cur.simulate) this.togglePlay();
+    });
     this.wrap.addEventListener('pointerdown', e=>{ if(e.pointerType==='touch') this.flashControls(); });
   }
   showLoading(on){ if(this.loading) this.loading.hidden = !on; }
@@ -3134,6 +3162,10 @@ function bindUpgrades(){
 function boot(){
   loadState();
   console.log(`DEEPREEL ${APP_VERSION} 已启动`);
+  /* PWA：Service Worker 注册（file:// 不支持，仅在 http/https 环境生效） */
+  if('serviceWorker' in navigator && /^https?:$/.test(location.protocol)){
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  }
   applyTheme(state.settings.theme || 'light', false);
   player = new PlayerBridge();
   bind();

@@ -1516,3 +1516,37 @@ html.theme-fade .modal, html.theme-fade .mini-modal-mask{
 .course-card:hover .course-cover{ background-size:112% 112%; }
 .pin-card{ transition:transform .3s var(--ease), box-shadow .3s var(--ease); }
 .pin-card:hover{ transform:translateY(-3px); box-shadow:var(--shadow-sm); }
+
+/* ============================================================
+   移动端适配：触控 / safe-area / 横屏 / PWA
+   ============================================================ */
+body{ -webkit-tap-highlight-color:transparent; }
+button, a{ touch-action:manipulation; }   /* 去掉移动端双击缩放延迟 */
+
+/* 刘海屏安全区 */
+.topbar{
+  padding-left:max(clamp(20px,5vw,56px), env(safe-area-inset-left));
+  padding-right:max(clamp(20px,5vw,56px), env(safe-area-inset-right));
+}
+.asst-drawer{
+  height:100vh;
+  height:100dvh;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+.asst-fab{ bottom:calc(22px + env(safe-area-inset-bottom)); }
+.player-controls{ padding-bottom:calc(10px + env(safe-area-inset-bottom)); }
+.view--watch{ padding-bottom:calc(80px + env(safe-area-inset-bottom)); }
+
+/* 横屏手机/小平板：目录侧栏回到右侧 */
+@media (orientation:landscape) and (max-width:1000px) and (min-width:600px){
+  .watch-main{ grid-template-columns:1fr 300px; }
+  .side-panel{ position:sticky; top:84px; }
+}
+
+/* 小屏触控目标放大 */
+@media (max-width:640px){
+  .pc-btn{ padding:8px 12px; font-size:13px; }
+  .mini-btn{ padding:8px 12px; }
+  .pc-vol{ width:64px; }
+  .part-bar{ padding:10px 12px; }
+}
