@@ -259,6 +259,28 @@ function proxyBase(){
   const m = ep.match(/^(https?:\/\/[^/]+)/);
   return m ? m[1] : 'http://localhost:7392';
 }
+/* 带超时的 fetch：任何请求都不会无限挂起 */
+function fetchTimeout(url, opts={}, ms=8000){
+  const ctl = new AbortController();
+  const timer = setTimeout(()=>ctl.abort(), ms);
+  return fetch(url, Object.assign({}, opts, { signal: ctl.signal })).finally(()=>clearTimeout(timer));
+}
+/* 并行赛跑：直连 + 全部公共代理同时发起，先成功者胜，总耗时 ≈ 最快路径 */
+async function biliJSON(apiUrl){
+  const attempts = [
+    { url: apiUrl, opts: { credentials:'omit', mode:'cors' }, ms: 6000 },
+    ...PROXIES.map(fn=>({ url: fn(apiUrl), opts: {}, ms: 8000 })),
+  ];
+  const results = await Promise.allSettled(attempts.map(async a=>{
+    const r = await fetchTimeout(a.url, a.opts, a.ms);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j = JSON.parse(await r.text());
+    if(j && j.code===0) return j;
+    throw new Error('code '+(j&&j.code));
+  }));
+  const ok = results.find(x=>x.status==='fulfilled');
+  return ok ? ok.value : null;
+}
 /* B站封面：直连优先（实测浏览器直连可正常加载，无需代理）；失败时再走本地代理防盗链兜底 */
 function coverUrl(u){
   if(!u) return u || '';
@@ -285,22 +307,6 @@ function wireCoverFallbacks(scope){
 }
 function biliCookie(){ return state.settings.biliCookie || ''; }
 
-async function biliJSON(apiUrl){
-  // 1) 直连
-  try{ const r = await fetch(apiUrl, { credentials:'omit', mode:'cors' }); if(r.ok){ const j=await r.json(); if(j&&j.code===0) return j; } }catch{}
-  // 2) 代理兜底
-  for(const p of PROXIES){
-    try{
-      const r = await fetch(p(apiUrl));
-      if(!r.ok) continue;
-      const text = await r.text();
-      const j = JSON.parse(text);
-      if(j && j.code===0) return j;
-    }catch{}
-  }
-  return null;
-}
-
 function parseVideoData(bvid, d){
   return {
     bvid, aid:d.aid, isSample:false,
@@ -310,21 +316,29 @@ function parseVideoData(bvid, d){
 }
 
 async function fetchVideoInfo(bvid){
-  // 1) 本地代理
-  try{
-    const r = await fetch(`${proxyBase()}/bili/view?bvid=${bvid}`, { headers: { 'X-Bili-Cookie': biliCookie() } });
-    if(r.ok){ const j = await r.json(); if(j && j.code===0 && j.data) return parseVideoData(bvid, j.data); }
-  }catch{}
-  // 2) 公共代理兜底
-  const j = await biliJSON(`${VIEW_API}?bvid=${bvid}`);
-  if(!j || !j.data) return null;
-  return parseVideoData(bvid, j.data);
+  // 本地代理 + 直连 + 公共代理 并行赛跑，先成功者胜；每路均带超时
+  const makeAttempt = async (url, opts, ms, needData) => {
+    const r = await fetchTimeout(url, opts, ms);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j = await r.json();
+    if(j && j.code===0 && (!needData || j.data)) return j;
+    throw new Error('code '+(j&&j.code));
+  };
+  const jobs = [
+    makeAttempt(`${proxyBase()}/bili/view?bvid=${bvid}`, { headers:{'X-Bili-Cookie':biliCookie()} }, 6000, true),
+    makeAttempt(`${VIEW_API}?bvid=${bvid}`, { credentials:'omit', mode:'cors' }, 6000, true),
+    ...PROXIES.map(p=>makeAttempt(p(`${VIEW_API}?bvid=${bvid}`), {}, 8000, true)),
+  ];
+  const results = await Promise.allSettled(jobs);
+  const ok = results.find(x=>x.status==='fulfilled');
+  if(!ok || !ok.value || !ok.value.data) return null;
+  return parseVideoData(bvid, ok.value.data);
 }
 
 async function fetchSubtitle(bvid, cid){
-  // 1) 本地代理
+  // 1) 本地代理（字幕列表 + 字幕正文，均带超时）
   try{
-    const r = await fetch(`${proxyBase()}/bili/player?bvid=${bvid}&cid=${cid}`, { headers: { 'X-Bili-Cookie': biliCookie() } });
+    const r = await fetchTimeout(`${proxyBase()}/bili/player?bvid=${bvid}&cid=${cid}`, { headers: { 'X-Bili-Cookie': biliCookie() } }, 6000);
     if(r.ok){
       const j = await r.json();
       if(j && j.data && j.data.subtitle){
@@ -332,22 +346,26 @@ async function fetchSubtitle(bvid, cid){
         if(subs.length){
           let url = subs[0].subtitle_url || '';
           if(url.startsWith('//')) url = 'https:'+url;
-          try{ const r2 = await fetch(`${proxyBase()}/bili/stream?url=${encodeURIComponent(url)}`); if(r2.ok){ const t = await r2.text(); return JSON.parse(t); } }catch{}
-          try{ const r2 = await fetch(url, {credentials:'omit'}); if(r2.ok){ const t = await r2.text(); return JSON.parse(t); } }catch{}
+          try{ const r2 = await fetchTimeout(`${proxyBase()}/bili/stream?url=${encodeURIComponent(url)}`, {}, 8000); if(r2.ok){ const t = await r2.text(); return JSON.parse(t); } }catch{}
+          try{ const r2 = await fetchTimeout(url, {credentials:'omit'}, 8000); if(r2.ok){ const t = await r2.text(); return JSON.parse(t); } }catch{}
         }
       }
     }
   }catch{}
-  // 2) 公共代理兜底
+  // 2) 公共代理兜底（并行赛跑）
   const j = await biliJSON(`${PLAYER_V2}?bvid=${bvid}&cid=${cid}`);
   if(!j || !j.data || !j.data.subtitle) return null;
   const subs = j.data.subtitle.subtitles || [];
   if(!subs.length) return null;
   let url = subs[0].subtitle_url || '';
   if(url.startsWith('//')) url = 'https:'+url;
-  try{ const r= await fetch(url, {credentials:'omit'}); if(r.ok){ const t=await r.text(); return JSON.parse(t); } }catch{}
-  for(const p of PROXIES){
-    try{ const r= await fetch(p(url)); if(r.ok){ const t=await r.text(); return JSON.parse(t); } }catch{}
+  const jobs = [
+    fetchTimeout(url, {credentials:'omit'}, 8000).then(r=>r.ok?r.text():Promise.reject(new Error('HTTP '+r.status))),
+    ...PROXIES.map(p=>fetchTimeout(p(url), {}, 8000).then(r=>r.ok?r.text():Promise.reject(new Error('HTTP '+r.status)))),
+  ];
+  const results = await Promise.allSettled(jobs);
+  for(const x of results){
+    if(x.status==='fulfilled'){ try{ return JSON.parse(x.value); }catch{} }
   }
   return null;
 }
@@ -2249,9 +2267,13 @@ async function doImport(raw){
   if(state.courses.some(c=>c.bvid===bvid)){ errEl.textContent='该课程已在库中。'; openCourse(bvid); return; }
 
   const btn = qs('#btn-import'); const old = btn.textContent; btn.textContent='导入中…'; btn.disabled=true;
+  errEl.classList.add('hint');
+  errEl.textContent = '正在获取视频信息…（本地代理未启动时会走公共代理，可能稍慢）';
   try{
     const info = await fetchVideoInfo(bvid);
+    errEl.classList.remove('hint');
     if(!info || !info.parts.length){ errEl.textContent='获取失败：可能是接口/代理受限，或视频无分 P。稍后再试，或先「载入示例」。'; return; }
+    errEl.textContent = '';
     info.addedAt = Date.now();
     state.courses.push(info);
     saveCourses();
@@ -2259,6 +2281,7 @@ async function doImport(raw){
     toast('新书入架，开卷有益，已进入专注模式');
     openCourse(bvid);
   }catch(e){
+    errEl.classList.remove('hint');
     errEl.textContent = '导入异常：'+(e.message||'')+'。可先「载入示例」体验。';
   }finally{
     btn.textContent=old; btn.disabled=false;
