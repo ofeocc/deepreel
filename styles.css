@@ -627,13 +627,14 @@ body{
 }
 .player-loading[hidden]{ display:none; }
 .tv-loading{ display:flex; flex-direction:column; align-items:center; gap:16px; }
-.tv-svg{ color:#222; filter:drop-shadow(0 5px 16px rgba(0,0,0,.12)); transform-origin:center; animation:tvSway .55s ease-in-out infinite; }
-@keyframes tvSway{
-  0%,100%{ transform:translateX(-4px) rotate(-2deg); }
-  25%{ transform:translateX(-1px) rotate(0deg); }
-  50%{ transform:translateX(4px) rotate(2deg); }
-  75%{ transform:translateX(1px) rotate(0deg); }
+/* B站涂鸦小电视：直接使用原版 5 帧素材（雪碧图逐帧播放，0.5s 循环，完全复刻） */
+.tv-sprite{
+  width:90px; height:90px; image-rendering:auto;
+  background:url("tv-loading.png") no-repeat;
+  background-size:450px 90px;      /* 原版 5 帧雪碧图，5×90 */
+  animation:tvPlay .5s steps(5, end) infinite;
 }
+@keyframes tvPlay{ 100%{ background-position:-450px 0; } }
 .tv-tag{ font-family:var(--font-mono); font-size:12px; letter-spacing:.04em; color:rgba(0,0,0,.55); }
 /* AI 摘要 / 助手「思考中」加载点（播放器已用涂鸦小电视，此样式保留给 AI 相关 UI） */
 .sk-loader{
