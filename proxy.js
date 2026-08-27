@@ -1,18 +1,25 @@
 /* eslint-disable */
 /*
-  DEEPREEL 本地代理 v2
+  DEEPREEL 本地代理 v3
   ------------------------------------------------------------------
-  三个功能：
-  1) DeepSeek API 代理 → POST /chat/completions
-  2) B站视频流 API 代理 → GET /bili/playurl?bvid=xxx&cid=xxx&qn=80&fnval=1
-  3) B站视频流转发     → GET /bili/stream?url=xxx
+  一个命令，开箱即用：
+    1) 托管整个应用（index.html / app.js / styles.css）
+    2) DeepSeek API 代理      → POST /chat/completions
+    3) B站视频流 API 代理     → GET /bili/playurl?bvid=xxx&cid=xxx&qn=80&fnval=1
+    4) B站视频流转发          → GET /bili/stream?url=xxx
+    5) 健康检查               → GET /healthz
+    6) 启动后自动打开浏览器   → http://localhost:7392/
 
   用法：
-    node proxy.js
+    npm start        # 或 node proxy.js
   端口默认 7392，可用环境变量 DEEPREEL_PORT 修改
+  不想自动打开浏览器：DEEPREEL_NO_OPEN=1 node proxy.js
 */
 const http = require('http');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
+const { exec } = require('child_process');
 
 const PORT = process.env.DEEPREEL_PORT || 7392;
 const DS_UPSTREAM = process.env.DEEPREEL_UPSTREAM || 'api.deepseek.com';
@@ -44,7 +51,10 @@ http.createServer((req, res) => {
   const parsed = new URL(req.url, `http://localhost:${PORT}`);
   const path = parsed.pathname;
 
-  if (path === '/chat/completions' || path === '/v1/chat/completions') {
+  if (path === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+    return res.end(JSON.stringify({ ok: true, name: 'deepreel-proxy', version: 3 }));
+  } else if (path === '/chat/completions' || path === '/v1/chat/completions') {
     handleDeepSeek(req, res);
   } else if (path === '/bili/playurl') {
     handleBiliPlayurl(req, res, parsed);
@@ -61,17 +71,67 @@ http.createServer((req, res) => {
   } else if (path === '/bili/img') {
     handleBiliImg(req, res, parsed);
   } else {
-    res.writeHead(404, { 'Content-Type': 'application/json', ...CORS });
-    res.end(JSON.stringify({ error: 'not_found', path }));
+    serveStatic(req, res, path);
   }
 }).listen(PORT, () => {
-  console.log(`\n  DEEPREEL 代理 v2 已启动`);
-  console.log(`  端口      → http://localhost:${PORT}`);
+  const url = `http://localhost:${PORT}/`;
+  console.log(`\n  DEEPREEL 代理 v3 已启动`);
+  console.log(`  应用地址  → ${url}`);
   console.log(`  DeepSeek  → /chat/completions`);
   console.log(`  B站 API   → /bili/playurl, /bili/view, /bili/player`);
   console.log(`  B站 流    → /bili/stream?url=xxx`);
   console.log(`  按 Ctrl+C 停止\n`);
+  if (!process.env.DEEPREEL_NO_OPEN) openBrowser(url);
 });
+
+/* ============ 静态文件托管（让 npm start 直接打开完整应用） ============ */
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
+  '.webp': 'image/webp',
+  '.woff2': 'font/woff2',
+  '.map': 'application/json',
+};
+
+function serveStatic(req, res, pathname) {
+  let rel = decodeURIComponent(pathname);
+  if (rel === '/' || rel === '') rel = '/index.html';
+  const file = path.normalize(path.join(__dirname, rel));
+  /* 防目录穿越：只能访问代理所在目录内的文件 */
+  if (!file.startsWith(__dirname + path.sep)) {
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('forbidden');
+  }
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('404 - not found');
+    }
+    const ext = path.extname(file).toLowerCase();
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Cache-Control': 'no-cache',
+    });
+    fs.createReadStream(file).pipe(res);
+  });
+}
+
+/* ============ 自动打开浏览器 ============ */
+function openBrowser(url) {
+  const cmd = process.platform === 'win32'
+    ? `start "" "${url}"`
+    : process.platform === 'darwin' ? `open "${url}"` : `xdg-open "${url}"`;
+  exec(cmd, () => {});
+}
 
 /* ============ DeepSeek 代理 ============ */
 function handleDeepSeek(req, res) {

@@ -16,16 +16,20 @@
 
 ## 🚀 快速开始
 
-```bash
-# 1. 启动本地代理（DeepSeek / B 站 API 转发，端口默认 7392）
-node proxy.js
-# 或
-npm start
+**需要 [Node.js](https://nodejs.org/)（仅用于本地代理，版本 ≥ 14）。**
 
-# 2. 用浏览器打开 index.html（或任意静态服务器）
+```bash
+git clone <本仓库地址>
+cd deepreel
+npm start
 ```
 
-> ⚠️ **为什么需要本地代理？** DeepSeek 与 B 站接口存在 CORS 限制，且 B 站封面有防盗链。`proxy.js` 在本机做转发，Cookie 与 API Key 均不出本机。
+`npm start` 一条命令完成全部：启动本地代理（端口 7392）→ 托管整个应用 → **自动打开浏览器**。
+
+- **Windows 用户**：也可以直接双击 `start.bat`，无需命令行
+- **macOS / Linux**：`./start.sh` 或 `npm start`
+
+> 直接双击 `index.html` 也能打开界面（浏览、导入、封面可用），但**视频流解析、AI 摘要、高清画质需要本地代理**——应用会自动检测并在未启动时提示。
 
 ## ⚙️ 配置
 
@@ -48,8 +52,10 @@ deepreel/
 ├── index.html      # 单页应用入口
 ├── app.js          # 全部前端逻辑（~2900 行）
 ├── styles.css      # 设计系统（CSS 变量 + 三套主题）
-├── proxy.js        # 本地代理：DeepSeek / B 站 API
-└── package.json    # npm start = node proxy.js
+├── proxy.js        # 本地代理：托管应用 + DeepSeek / B 站 API（零依赖）
+├── package.json    # npm start = node proxy.js
+├── start.bat       # Windows 双击启动
+└── start.sh        # macOS / Linux 一键启动
 ```
 
 ## 🔒 隐私

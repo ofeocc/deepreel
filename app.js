@@ -2770,6 +2770,22 @@ function bind(){
   });
 }
 
+/* ============ 本地代理健康检测 ============ */
+function proxyHost(){
+  const m = proxyBase().match(/^https?:\/\/([^/]+)/);
+  return m ? m[1] : '';
+}
+function checkProxyHealth(){
+  // 页面本身由代理托管（http://localhost:7392 打开）→ 已可用，无需提示
+  if(location.protocol === 'http:' && proxyHost() && location.host === proxyHost()) return;
+  fetchTimeout(`${proxyBase()}/healthz`, {}, 2500)
+    .then(r=>{ if(!r.ok) throw new Error('down'); })
+    .catch(()=>{
+      const b = qs('#proxy-banner');
+      if(b) b.hidden = false;
+    });
+}
+
 /* ============ 主题系统 ============ */
 const THEME_NAMES = { light:'宣纸自习室', night:'深夜书房', green:'青绿笔记' };
 function applyTheme(name, persist=true){
@@ -2926,6 +2942,7 @@ function bindUpgrades(){
   qs('#btn-report-done').addEventListener('click', ()=>{ qs('#report-modal').hidden = true; });
   qs('#btn-report-copy').addEventListener('click', copyLearningReport);
   qs('#report-modal').addEventListener('click', e=>{ if(e.target.id==='report-modal') qs('#report-modal').hidden = true; });
+  qs('#btn-proxy-banner-close').addEventListener('click', ()=>{ qs('#proxy-banner').hidden = true; });
 }
 
 /* ============ 启动 ============ */
@@ -2946,6 +2963,7 @@ function boot(){
   }
   updateAIStatus();
   initMotion();
+  checkProxyHealth();
   renderLibrary();
   maybeShowOnboarding();
   // Hero 入场
