@@ -57,7 +57,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.0.4'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.0.5'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -236,12 +236,8 @@ function initMotion(){
       requestAnimationFrame(raf);
     }catch{ lenis=null; }
   }
-  /* 内部滚动容器不被 Lenis 劫持：悬停时暂停页面平滑滚动，离开后恢复 */
-  qsa('.asst-drawer, .asst-messages, .toc, .report-body, .yr-scroll').forEach(el=>{
-    el.addEventListener('wheel', ()=>{ if(lenis) lenis.stop(); }, { passive:true });
-    el.addEventListener('mouseenter', ()=>{ if(lenis) lenis.stop(); }, { passive:true });
-    el.addEventListener('mouseleave', ()=>{ if(lenis) lenis.start(); }, { passive:true });
-  });
+  /* 内部滚动容器已加 data-lenis-prevent-wheel（Lenis 官方豁免属性）：
+     Lenis 对落在这些容器上的滚轮事件直接放行，不 preventDefault，原生滚动生效 */
 }
 function reveal(sel, opts={}){
   if(!window.gsap) return;
