@@ -255,7 +255,7 @@ function handleBiliPlayer(req, res, parsed) {
     return res.end(JSON.stringify({ code: -1, message: 'missing bvid or cid' }));
   }
 
-  const apiPath = `/x/player/v2?bvid=${bvid}&cid=${cid}`;
+  const apiPath = `/x/player/wbi/v2?bvid=${bvid}&cid=${cid}&web_location=1315873`;
 
   const proxyReq = https.request({
     host: 'api.bilibili.com',

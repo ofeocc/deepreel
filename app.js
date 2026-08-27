@@ -12,7 +12,7 @@ const LS_SAMPLE = 'deepreel.sample.loaded';
 
 const PLAYER_ORIGIN = 'https://player.bilibili.com';
 const VIEW_API = 'https://api.bilibili.com/x/web-interface/view';
-const PLAYER_V2 = 'https://api.bilibili.com/x/player/v2';
+const PLAYER_V2 = 'https://api.bilibili.com/x/player/wbi/v2';
 
 // 多代理兜底（浏览器无法直连 api.bilibili.com）
 const PROXIES = [
@@ -57,7 +57,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.0.5'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.0.6'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -356,7 +356,7 @@ async function fetchSubtitle(bvid, cid){
     }
   }catch{}
   // 2) 公共代理兜底（并行赛跑）
-  const j = await biliJSON(`${PLAYER_V2}?bvid=${bvid}&cid=${cid}`);
+  const j = await biliJSON(`${PLAYER_V2}?bvid=${bvid}&cid=${cid}&web_location=1315873`);
   if(!j || !j.data || !j.data.subtitle) return null;
   const subs = j.data.subtitle.subtitles || [];
   if(!subs.length) return null;
@@ -2054,12 +2054,11 @@ async function getPartText(c, p){
   if(p.cid){
     const sub = await fetchSubtitle(c.bvid, p.cid);
     if(sub && sub.body){
-      /* 保留带时间戳的字幕原文（位置感知用），文本摘录照旧 */
       if(!p._subRaw) p._subRaw = sub;
       return sub.body.map(b=>b.content).join(' ');
     }
   }
-  return p.part + '。' + (c.title||'') + '。'; // 退化为标题
+  return ''; // 无字幕：由调用方如实告知 AI，避免 AI 臆测视频内容
 }
 /* 提取「当前播放位置」附近的字幕片段（前后各 90 秒，取最近 12 条） */
 function subtitleAround(p, t){
@@ -2204,8 +2203,10 @@ async function buildAssistantMessages(userText, c = activeCourse(), p = c && c.p
   let ctx;
   if(p._summary){ ctx = `本 P 摘要：${p._summary}`; }
   else {
-    if(!p._subText) p._subText = await getPartText(c, p).catch(()=> (p.part||''));
-    ctx = `本 P 字幕摘录：${(p._subText||'').slice(0, 3000)}`;
+    if(p._subText === undefined) p._subText = await getPartText(c, p).catch(()=> '');
+    ctx = p._subText
+      ? `本 P 字幕摘录：${p._subText.slice(0, 3000)}`
+      : '未能获取本 P 字幕（可能原因：未登录 B 站、该视频无可用字幕，或网络异常）。请如实告知学生字幕缺失，基于标题与已有信息谨慎回答，不要臆测视频实际内容。';
   }
   const note = p.note ? `\n学生本 P 笔记：${p.note}` : '';
   /* 位置感知：当前播放时间 + 该时刻附近字幕 + 课程进度 */
@@ -2244,9 +2245,20 @@ function renderAssistant(){
   const box = qs('#asst-messages');
   if(!c){ box.innerHTML = '<div class="asst-empty">先在课程库打开一个视频，<br/>再向我提问或记笔记。</div>'; return; }
   const msgs = c.chat || [];
-  const msgText = m => typeof m.content === 'string' ? m.content
-    : (Array.isArray(m.content) ? m.content.map(x=> x.type==='text' ? x.text : '[图片]').join(' ') : String(m.content||''));
-  const html = msgs.map(m => `<div class="asst-bubble ${m.role}">${escapeHtml(msgText(m))}</div>`).join('');
+  const msgHtml = m => {
+    if(typeof m.content === 'string') return escapeHtml(m.content);
+    if(Array.isArray(m.content)){
+      return m.content.map(x=>{
+        if(x.type==='text') return escapeHtml(x.text);
+        if(x.type==='image_url' && x.image_url && x.image_url.url){
+          return `<img class="asst-bubble-img" src="${x.image_url.url}" alt="截图" loading="lazy">`;
+        }
+        return '';
+      }).join('');
+    }
+    return escapeHtml(String(m.content||''));
+  };
+  const html = msgs.map(m => `<div class="asst-bubble ${m.role}">${msgHtml(m)}</div>`).join('');
   const liveCtx = assistantThinking && assistantStreamCtx && c.bvid === assistantStreamCtx.bvid && state.activePart === assistantStreamCtx.partIndex
     ? assistantStreamCtx
     : null;
