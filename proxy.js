@@ -56,6 +56,11 @@ const handler = (req, res) => {
   if (path === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
     return res.end(JSON.stringify({ ok: true, name: 'deepreel-proxy', version: 3 }));
+  } else if (path === '/debug-report') {
+    const m = parsed.searchParams.get('m') || '';
+    logLine(`[app] from=${req.socket.remoteAddress} ${m}`);
+    res.writeHead(200, { 'Content-Type': 'application/json', ...CORS });
+    return res.end('{}');
   } else if (path === '/chat/completions' || path === '/v1/chat/completions') {
     handleDeepSeek(req, res);
   } else if (path === '/bili/playurl') {
@@ -262,7 +267,7 @@ function handleBiliPlayurl(req, res, parsed) {
   const qn = parsed.searchParams.get('qn') || '80';
   const fnval = parsed.searchParams.get('fnval') || '1';
   const cookie = req.headers['x-bili-cookie'] || '';
-  logLine(`[playurl] req bvid=${bvid} cid=${cid} qn=${qn} fnval=${fnval} cookie=${cookie ? 'yes' : 'no'}`);
+  logLine(`[playurl] req from=${req.socket.remoteAddress} bvid=${bvid} cid=${cid} qn=${qn} fnval=${fnval} cookie=${cookie ? 'yes' : 'no'}`);
 
   if (!bvid || !cid) {
     res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
@@ -424,8 +429,16 @@ function handleBiliQrPoll(req, res, parsed) {
 
 /* ============ B站视频流转发 ============ */
 function handleBiliStream(req, res, parsed) {
-  const streamUrl = parsed.searchParams.get('url');
-  logLine(`[stream] req range=${req.headers['range'] || '-'} url=${(streamUrl||'').slice(0,60)}`);
+  /* 兼容两种参数：url=原始编码地址（旧），u=base64url 伪装地址（新，防浏览器拦截） */
+  let streamUrl = parsed.searchParams.get('url') || '';
+  const uParam = parsed.searchParams.get('u');
+  if (uParam) {
+    try {
+      const b = uParam.replace(/-/g, '+').replace(/_/g, '/');
+      streamUrl = Buffer.from(b, 'base64').toString('utf8');
+    } catch { /* 保持空 */ }
+  }
+  logLine(`[stream] req from=${req.socket.remoteAddress} range=${req.headers['range'] || '-'} url=${(streamUrl||'').slice(0,60)}`);
   if (!streamUrl) {
     res.writeHead(400, { 'Content-Type': 'application/json', ...CORS });
     return res.end(JSON.stringify({ error: 'missing url param' }));

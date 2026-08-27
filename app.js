@@ -44,6 +44,15 @@ const SAMPLE_COURSE = {
 /* 中文停用词（摘要用） */
 const STOP = new Set('的了是在和与及或而我你他这那有也就都还又才把被让使到从对给向以之其于了着过吗呢吧啊呀哦嗯一个一种一些这那'.split(''));
 
+/* 错误上报到代理日志（排查手机端问题用） */
+function reportDebug(msg){
+  try{ fetch(`${proxyBase()}/debug-report?m=${encodeURIComponent(String(msg).slice(0,200))}`).catch(()=>{}); }catch{}
+}
+
+function b64url(s){ return btoa(unescape(encodeURIComponent(s))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+/* 拉流地址（上游 URL base64 伪装，避免请求里出现 bilivideo.com 等被浏览器拦截） */
+function streamUrl(u){ return `${proxyBase()}/bili/stream?u=${b64url(u)}`; }
+
 /* ============ 状态 & 存储 ============ */
 let state = {
   courses: [],
@@ -1312,10 +1321,13 @@ class PlayerBridge{
     v.addEventListener('canplay', ()=> this.showLoading(false));
     v.addEventListener('playing', ()=> { this.showLoading(false); this._retried=false; this._errToasted=false; });
     v.addEventListener('error', ()=> {
+      reportDebug('video-error mode=' + this.mode + ' code=' + (this.video.error ? this.video.error.code : '?') + ' src=' + String(this.video.currentSrc||this.video.src||'').slice(0,60));
       // teardown 也会触发 error（清空 src），用 mode 判别真实播放错误
       if(this.mode && this.cur.course && !this.cur.simulate) this.onStreamError(new Error('video element error'));
       else this.showLoading(false);
     });
+    v.addEventListener('loadstart', ()=> reportDebug('video-loadstart'));
+    v.addEventListener('loadedmetadata', ()=> reportDebug('video-loadedmeta dur=' + (this.video.duration||0)));
     // 触屏：单击播放/暂停，双击快进(+10s)/快退(-10s)；鼠标：单击切播放、双击忽略
     this._touchMode = ('ontouchstart' in window) || (window.matchMedia && window.matchMedia('(hover:none)').matches);
     this._tapT = null; this._lastTap = 0; this._skipClick = false;
@@ -1402,6 +1414,7 @@ class PlayerBridge{
           await this.setupDash(data, resumeAt);
         }catch(e){
           // MSE/编码不支持 → 退回 MP4（fnval=1）
+          reportDebug('dash-fallback: ' + (e.message||e) + ' mse=' + (!!window.MediaSource) + ' typeok=' + (window.MediaSource ? MediaSource.isTypeSupported('video/mp4; codecs="avc1.640032"') : 'n/a'));
           this.teardown();
           data = await this.fetchPlayurl(c.bvid, p.cid, 1);
           this.fillQualityOptions(data);
@@ -1418,6 +1431,7 @@ class PlayerBridge{
       }
     }catch(e){
       this.showLoading(false);
+      reportDebug('load-error: ' + (e.message||e));
       toast('视频加载失败：' + (e.message||'') + '。请确认代理已启动、已扫码登录。');
       return;
     }
@@ -1453,8 +1467,17 @@ class PlayerBridge{
     if(!pool.length) pool = list.filter(x=>/^(hvc1|hev1|av01)/i.test(x.codecs||''));
     if(!pool.length) pool = list;
     if(!pool.length) return null;
-    const below = pool.filter(x=>x.id <= want).sort((a,b)=>b.id-a.id);
-    return below[0] || pool.slice().sort((a,b)=>a.id-b.id)[0];
+    /* 从期望清晰度向下逐档尝试，选手机能解码的第一个（如 1080p 不支持则 720p/480p） */
+    const ids = [...new Set(pool.map(x=>x.id))].sort((a,b)=>b-a);
+    const order = ids.filter(id=>id<=want).concat(ids.filter(id=>id>want).reverse());
+    for(const id of order){
+      const cand = pool.filter(x=>x.id===id).sort((a,b)=>(b.bandwidth||0)-(a.bandwidth||0))[0];
+      if(!cand) continue;
+      if(!window.MediaSource || !MediaSource.isTypeSupported || MediaSource.isTypeSupported(`video/mp4; codecs="${cand.codecs}"`)){
+        return cand;
+      }
+    }
+    return null;
   }
   pickAudioStream(dash){
     const list = dash.audio || [];
@@ -1477,8 +1500,8 @@ class PlayerBridge{
     this.mode = 'dash';
     this.dur = (data.timelength||0)/1000 || (this.cur.duration||0);
     this.cur.duration = this.cur.duration || this.dur;
-    this.streamBase.video = `${this.proxyBase()}/bili/stream?url=${encodeURIComponent(vs.baseUrl || vs.base_url)}`;
-    this.streamBase.audio = as ? `${this.proxyBase()}/bili/stream?url=${encodeURIComponent(as.baseUrl || as.base_url)}` : '';
+    this.streamBase.video = streamUrl(vs.baseUrl || vs.base_url);
+    this.streamBase.audio = as ? streamUrl(as.baseUrl || as.base_url) : '';
     this.totalSize = { video:0, audio:0 };
     this.ms = new MediaSource();
     this.msURL = URL.createObjectURL(this.ms);
@@ -1514,7 +1537,7 @@ class PlayerBridge{
     this.mode = 'mp4';
     this.dur = (data.timelength||0)/1000 || this.cur.duration || 0;
     this.segs = durl.map(d=>({
-      url: `${this.proxyBase()}/bili/stream?url=${encodeURIComponent(d.url || (d.backup_url && d.backup_url[0]) || '')}`,
+      url: streamUrl(d.url || (d.backup_url && d.backup_url[0]) || ''),
       dur: (d.length||0)/1000
     }));
     this.segStart = [];
@@ -1536,6 +1559,8 @@ class PlayerBridge{
   attachSeg(offset){
     const seg = this.segs[this.segIdx]; if(!seg) return;
     this.video.src = seg.url;
+    this.video.load();   // teardown 后显式触发加载，否则可能不发起请求
+    reportDebug('mp4-src-set url=' + String(seg.url||'').slice(0,80));
     if(offset > 0){
       const onMeta = ()=>{ try{ this.video.currentTime = offset; }catch{} this.video.removeEventListener('loadedmetadata', onMeta); };
       this.video.addEventListener('loadedmetadata', onMeta);
