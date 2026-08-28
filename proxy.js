@@ -17,6 +17,8 @@
 */
 const http = require('http');
 const https = require('https');
+const net = require('net');
+const tls = require('tls');
 const fs = require('fs');
 const path = require('path');
 const dns = require('dns');
@@ -29,6 +31,78 @@ const BILI_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (K
 /* 全局 keep-alive：常驻连接避免每个请求冷启动（DNS/TLS），
    实测空闲后首个请求常超 20s、热连接 200ms —— 保持连接可根治 */
 https.globalAgent = new https.Agent({ keepAlive: true, maxSockets: 8, keepAliveMsecs: 30000 });
+
+/* ============ 上游 HTTP 代理（VPN 加速） ============
+   现象：系统全局代理开着时，浏览器/curl 走 VPN 快（B站 CDN ~457KB/s），
+   但 Node 的 https.request 默认不走系统代理，直连只有 ~83KB/s。
+   解决：探测本机 VPN 代理（默认 127.0.0.1:7790，可用 DEEPREEL_HTTP_PROXY 覆盖），
+   B站请求经 HTTP CONNECT 隧道走代理；代理不可用则自动回退直连。 */
+let UPSTREAM_PROXY = null;   // { host, port } 或 null
+/* 只让 API 域名走代理（实测 api 走 VPN 快 20 倍），视频 CDN（bilivideo/mcdn）直连更快（VPN 绕远） */
+const PROXY_HOSTS = new Set(['api.bilibili.com']);
+function detectUpstreamProxy(){
+  const env = process.env.DEEPREEL_HTTP_PROXY;
+  if(env){
+    try{ const u = new URL(env); UPSTREAM_PROXY = { host:u.hostname, port: parseInt(u.port||'7790',10) }; return; }catch{}
+  }
+  const s = net.connect(7790, '127.0.0.1');
+  let ok = false;
+  s.on('connect', ()=>{ ok = true; UPSTREAM_PROXY = { host:'127.0.0.1', port:7790 }; logLine('[proxy] upstream proxy detected 127.0.0.1:7790'); s.destroy(); });
+  s.on('error', ()=>{ if(!ok) UPSTREAM_PROXY = null; });
+  s.setTimeout(1500, ()=> s.destroy());
+}
+
+/* 经 CONNECT 隧道发起 https 请求，返回兼容 https.request 的接口（on/setTimeout/end） */
+function proxiedHttpsRequest(targetUrl, opts, onResponse){
+  const u = new URL(targetUrl);
+  const events = {};
+  const api = {
+    on(ev, cb){ events[ev] = cb; return api; },
+    setTimeout(ms, cb){ api._timeoutMs = ms; api._timeoutCb = cb; return api; },
+    end(){ api._ended = true; launch(); return api; },
+    destroy(e){ if(api._req) api._req.destroy(e); },
+    _timeoutMs: 0, _timeoutCb: null, _ended: false, _req: null,
+  };
+  const fail = e => { if(events['error']) events['error'](e); };
+  const direct = () => {
+    const r = https.request({ host:u.hostname, port:u.port||443, path:u.pathname+u.search, method:opts.method||'GET', headers:opts.headers||{}, rejectUnauthorized: opts.rejectUnauthorized !== false }, onResponse);
+    api._req = r;
+    r.on('error', fail);
+    if(api._timeoutMs) r.setTimeout(api._timeoutMs, api._timeoutCb || (()=>{}));
+    return r;
+  };
+  function launch(){
+    if(!UPSTREAM_PROXY || !PROXY_HOSTS.has(u.hostname)){ direct().end(); return; }
+    const socket = net.connect(UPSTREAM_PROXY.port, UPSTREAM_PROXY.host);
+    let settled = false;
+    socket.setTimeout(12000, ()=>{ if(!settled){ settled=true; socket.destroy(); fail(new Error('proxy connect timeout')); } });
+    socket.on('connect', ()=>{ socket.write(`CONNECT ${u.hostname}:${u.port||443} HTTP/1.1\r\nHost: ${u.hostname}:${u.port||443}\r\n\r\n`); });
+    let buf = '';
+    const onData = d => {
+      buf += d.toString('latin1');
+      const i = buf.indexOf('\r\n\r\n');
+      if(i === -1) return;
+      socket.removeListener('data', onData);
+      const statusLine = buf.slice(0, i).split('\r\n')[0];
+      if(!/ 200 /.test(statusLine)){ if(!settled){ settled=true; socket.destroy(); fail(new Error('CONNECT '+statusLine)); } return; }
+      settled = true;
+      socket.setTimeout(0);
+      /* CONNECT 隧道打通后，在明文 socket 上手动做 TLS 握手，再把 TLS socket 交给 https.request */
+      const tlsSock = tls.connect({ socket, servername: u.hostname, rejectUnauthorized: opts.rejectUnauthorized !== false });
+      tlsSock.once('secureConnect', () => {
+        const r = https.request({ host:u.hostname, port:u.port||443, path:u.pathname+u.search, method:opts.method||'GET', headers:opts.headers||{}, agent:false, createConnection: ()=>tlsSock }, onResponse);
+        api._req = r;
+        r.on('error', fail);
+        if(api._timeoutMs) r.setTimeout(api._timeoutMs, api._timeoutCb || (()=>{}));
+        r.end();
+      });
+      tlsSock.on('error', e => { if(settled){ settled = false; direct().end(); } else { fail(e); } });
+    };
+    socket.on('data', onData);
+    socket.on('error', () => { if(!settled){ settled=true; direct().end(); } });  // 代理不可用 → 直连兜底
+  }
+  return api;
+}
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -107,6 +181,9 @@ http.createServer(handler).on('error', (err) => {
   console.log(`  B站 流    → /bili/stream?url=xxx`);
   console.log(`  按 Ctrl+C 停止\n`);
   if (!process.env.DEEPREEL_NO_OPEN) openBrowser(url);
+  /* 探测本机 VPN 代理（加速 B站 CDN）；每 60s 重检，代理开关时自动切换 */
+  detectUpstreamProxy();
+  setInterval(detectUpstreamProxy, 60000);
   /* 预热：解析并轻连一次 api.bilibili.com，避免首个播放请求因 DNS/连接冷启动超时 */
   try { dns.lookup('api.bilibili.com', () => {}); } catch {}
   try {
@@ -289,9 +366,7 @@ function handleBiliPlayurl(req, res, parsed) {
 
   const apiPath = `/x/player/playurl?bvid=${bvid}&cid=${cid}&qn=${qn}&fnval=${fnval}&fnver=0&fourk=1`;
 
-  const proxyReq = https.request({
-    host: 'api.bilibili.com',
-    path: apiPath,
+  const proxyReq = proxiedHttpsRequest(`https://api.bilibili.com${apiPath}`, {
     method: 'GET',
     headers: {
       'Referer': 'https://www.bilibili.com',
@@ -480,10 +555,7 @@ function handleBiliStream(req, res, parsed) {
 
   // B站 CDN 可能返回 302 跳转到其它节点，跟随跳转（最多 5 次）
   const hop = (t, depth) => {
-    const proxyReq = https.request({
-      host: t.hostname,
-      port: t.port || 443,
-      path: t.pathname + t.search,
+    const proxyReq = proxiedHttpsRequest(t.href, {
       method: 'GET',
       headers: buildHeaders(),
       rejectUnauthorized: false, // mcdn 节点证书与域名不匹配，仅拉流可忽略
