@@ -66,7 +66,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.3.7'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.3.8'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -1299,7 +1299,8 @@ class PlayerBridge{
     this.stallTimer = null;
     this._lastT = -1;
     this._stallCount = 0;
-    this.AHEAD = 15;               // 分片调度：提前缓冲秒数
+    this.AHEAD = 45;               // 分片调度：提前缓冲秒数（加大预缓冲，抗 CDN 抖动）
+    this.SEG_CONC = { video: 3, audio: 2 };  // 每轨并发拉片数：并行拉取提升吞吐（慢网尤其明显）
     this.sched = null;             // 分片调度器状态
     // 学习计时：_started=播过至少一次；watch/think 未刷写秒数；_pauseAt=暂停起点（思考封顶用）
     this._started = false;
@@ -1650,15 +1651,14 @@ class PlayerBridge{
     if(this.abortCtl){ try{ this.abortCtl.abort(); }catch{} }
     this.abortCtl = new AbortController();
     this.sched = {
-      video:{ next:0, pending:false, retried:false },
-      audio:{ next:0, pending:false, retried:false },
+      video:{ next:0, appendNext:0, inflight:0, appending:false, retried:false, ready:new Map() },
+      audio:{ next:0, appendNext:0, inflight:0, appending:false, retried:false, ready:new Map() },
     };
-    await this.probeInit(this.streamBase.video, rid, 'video');
+    /* init/索引探测并行：音视频两个 probe 同时进行，省一次 RTT */
+    const probers = [this.probeInit(this.streamBase.video, rid, 'video')];
+    if(this.asb && this.streamBase.audio) probers.push(this.probeInit(this.streamBase.audio, rid, 'audio').catch(()=>{}));
+    await Promise.all(probers);
     if(rid !== this.runId) return;
-    if(this.asb && this.streamBase.audio){
-      await this.probeInit(this.streamBase.audio, rid, 'audio').catch(()=>{});
-      if(rid !== this.runId) return;
-    }
     if(!this.initSeg.video) throw new Error('无法读取视频流索引');
     if(!this.sidx.video){
       // 无 sidx 的老流：回退顺序流式（少见）
@@ -1692,29 +1692,28 @@ class PlayerBridge{
       const sb = key === 'video' ? this.vsb : this.asb;
       if(!sb) continue;
       const st = this.sched && this.sched[key];
-      if(!st || st.pending) continue;
+      if(!st) continue;
+      this.flushAppend(key);               // 先把已下载完成的片按序写入 SourceBuffer
+      const limit = this.SEG_CONC[key] || 2;
       const sdx = this.sidx[key];
-      if(!sdx || !sdx.segs.length || st.next >= sdx.segs.length) continue;
+      if(!sdx || !sdx.segs.length) continue;
       const b = sb.buffered;
       let end = 0;
       for(let i=0;i<b.length;i++) end = Math.max(end, b.end(i));
-      if(end - ct < this.AHEAD){
-        const rid = this.runId, idx = st.next;
-        st.pending = true;
-        this.appendSeg(key, idx, rid).finally(()=>{
-          const cur = this.sched && this.sched[key];
-          if(cur){ cur.pending = false; }
-          if(rid === this.runId) this.schedule();
-        });
+      /* 并发下载：只要缓冲不足就继续派发（不阻塞在单片下载上），并行拉取提升慢网吞吐 */
+      while(st.inflight < limit && st.next < sdx.segs.length && end - ct < this.AHEAD){
+        const rid = this.runId, idx = st.next++;
+        st.inflight++;
+        this.fetchSeg(key, idx, rid);
       }
     }
   }
-  async appendSeg(key, idx, rid){
-    const sb = key === 'video' ? this.vsb : this.asb;
-    if(!sb) return;
+  /* 下载单片：只拉取，不 append；完成后交给 flushAppend 按序写入 */
+  async fetchSeg(key, idx, rid){
+    const st = this.sched && this.sched[key];
     const sdx = this.sidx[key];
     const s = sdx && sdx.segs[idx];
-    if(!s) return;
+    if(!s){ if(st) st.inflight = Math.max(0, st.inflight - 1); return; }
     try{
       const resp = await fetch(this.streamBase[key], {
         headers:{ 'Range':`bytes=${s.byte}-${s.byte + s.size - 1}` },
@@ -1724,28 +1723,47 @@ class PlayerBridge{
       if(rid !== this.runId) return;
       const buf = new Uint8Array(await resp.arrayBuffer());
       if(rid !== this.runId) return;
-      if(!sb._initDone && this.initSeg[key]){
-        await this.sbAppend(sb, this.initSeg[key]);
-        sb._initDone = true;
+      st.retried = false;
+      st.ready.set(idx, buf);
+      st.inflight = Math.max(0, st.inflight - 1);
+      this.flushAppend(key);
+      if(rid === this.runId) this.schedule();
+    }catch(e){
+      if(rid !== this.runId || !e || e.name === 'AbortError') return;
+      if(st && !st.retried){
+        // 片级重试一次（网络抖动 / CDN 节点抽风），重试期间占用并发名额防止重复派发
+        st.retried = true;
+        setTimeout(()=>{ if(rid === this.runId) this.fetchSeg(key, idx, rid); }, 900);
+        return;
       }
-      await this.sbAppend(sb, buf);
-      if(rid === this.runId){
-        const st = this.sched[key];
-        st.next = Math.max(st.next, idx + 1);
-        st.retried = false;
+      if(st) st.inflight = Math.max(0, st.inflight - 1);
+      this.onStreamError(e);
+    }
+  }
+  /* 按片顺序写入 SourceBuffer：MSE appendBuffer 必须有序，乱序会导致解码错乱 */
+  async flushAppend(key){
+    const st = this.sched && this.sched[key];
+    if(!st || st.appending) return;
+    const sb = key === 'video' ? this.vsb : this.asb;
+    if(!sb) return;
+    st.appending = true;
+    try{
+      while(st.ready.has(st.appendNext)){
+        const buf = st.ready.get(st.appendNext);
+        st.ready.delete(st.appendNext);
+        if(!sb._initDone && this.initSeg[key]){
+          await this.sbAppend(sb, this.initSeg[key]);
+          sb._initDone = true;
+        }
+        await this.sbAppend(sb, buf);
+        st.appendNext++;
         this.maybePendingSeek();
         this.updateBuffered();
       }
     }catch(e){
-      if(rid !== this.runId || !e || e.name === 'AbortError') return;
-      const st = this.sched[key];
-      if(st && !st.retried){
-        // 片级重试一次（网络抖动 / CDN 节点抽风）
-        st.retried = true;
-        setTimeout(()=>{ if(rid === this.runId) this.appendSeg(key, idx, rid); }, 900);
-        return;
-      }
       this.onStreamError(e);
+    }finally{
+      st.appending = false;
     }
   }
   clearBuffers(){
@@ -1774,9 +1792,11 @@ class PlayerBridge{
     if(rid !== this.runId) return;
     if(this.sched){
       this.sched.video.next = this.segIdxForTime('video', t);
-      this.sched.video.pending = false; this.sched.video.retried = false;
+      this.sched.video.appendNext = this.sched.video.next;
+      this.sched.video.inflight = 0; this.sched.video.retried = false; this.sched.video.ready.clear();
       this.sched.audio.next = this.segIdxForTime('audio', t);
-      this.sched.audio.pending = false; this.sched.audio.retried = false;
+      this.sched.audio.appendNext = this.sched.audio.next;
+      this.sched.audio.inflight = 0; this.sched.audio.retried = false; this.sched.audio.ready.clear();
     }
     this.schedule();
   }
@@ -2071,7 +2091,7 @@ class PlayerBridge{
       let ahead = false;
       for(let i=0;i<b.length;i++){ if(ct >= b.start(i)-0.1 && ct < b.end(i)-0.3) ahead = true; }
       if(!ahead){
-        const inFlight = this.sched && !!(this.sched.video.pending || (this.sched.audio && this.sched.audio.pending));
+        const inFlight = this.sched && (this.sched.video.inflight > 0 || (this.sched.audio && this.sched.audio.inflight > 0));
         this._stallCount++;
         if(this._stallCount >= (inFlight ? 6 : 3)){
           this._stallCount = 0;

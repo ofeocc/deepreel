@@ -471,6 +471,7 @@ function handleBiliStream(req, res, parsed) {
       'Referer': 'https://www.bilibili.com',
       'User-Agent': BILI_UA,
       'Accept': '*/*',
+      'Accept-Encoding': 'identity',   // 视频流禁止压缩，保证 Range 字节对齐
     };
     if (cookie) h['Cookie'] = cookie;
     if (req.headers['range']) h['Range'] = req.headers['range'];
@@ -512,6 +513,9 @@ function handleBiliStream(req, res, parsed) {
         try { res.end(); } catch {}
       }
     });
+    /* 连接/空闲超时：上游 CDN 建立连接后 12s 无任何数据视为挂起，主动断开让浏览器重试，
+       避免"一直转圈"而非"慢" */
+    proxyReq.setTimeout(12000, () => { proxyReq.destroy(new Error('stream upstream timeout')); });
     proxyReq.end();
   };
   hop(target, 0);
