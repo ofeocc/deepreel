@@ -66,7 +66,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.4.0'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.4.1'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -1668,7 +1668,9 @@ class PlayerBridge{
     }
     if(fromTime > 0){
       this.sched.video.next = this.segIdxForTime('video', fromTime);
+      this.sched.video.appendNext = this.sched.video.next;   // 续播：写入指针同步到起点，否则拉回的片永不 append
       this.sched.audio.next = this.segIdxForTime('audio', fromTime);
+      this.sched.audio.appendNext = this.sched.audio.next;
     }
     this.schedule();
   }
