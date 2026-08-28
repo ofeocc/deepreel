@@ -66,7 +66,7 @@ let state = {
 };
 const PAGE_SIZE = 12;
 const THINK_CAP = 30 * 60;   // 单次连续暂停最长计入思考 30 分钟（防止挂机过夜刷数据）
-const APP_VERSION = '1.3.8'; // 调试/版本标识：控制台可见，设置页脚可见
+const APP_VERSION = '1.3.9'; // 调试/版本标识：控制台可见，设置页脚可见
 
 function loadState(){
   try{ const c = JSON.parse(localStorage.getItem(LS_COURSES) || '[]'); state.courses = Array.isArray(c)? c : []; }catch{ state.courses=[]; }
@@ -1845,7 +1845,10 @@ class PlayerBridge{
     })();
   }
   async probeInit(url, rid, key){
-    const resp = await fetch(url, { headers:{ 'Range':'bytes=0-262143' }, signal: this.abortCtl.signal });
+    /* sidx 索引盒通常位于文件头部几 KB 内（B站给的 indexRange 1000-3959），
+       拉 256KB 属纯浪费——慢网下多花 2s+。改拉 64KB，足以覆盖 init+sidx+moof，
+       首帧探测显著提速。 */
+    const resp = await fetch(url, { headers:{ 'Range':'bytes=0-65535' }, signal: this.abortCtl.signal });
     if(!resp.ok && resp.status !== 206) throw new Error('流探测失败');
     const cr = resp.headers.get('content-range');
     const m = cr && cr.match(/\/(\d+)$/);
